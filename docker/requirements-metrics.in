@@ -1,0 +1,24 @@
+# Dependencies of the metrics repo (Exp 0).
+#
+# This file lists WHAT is needed. It is not the pin — compile it first:
+#
+#     uv pip compile docker/requirements-metrics.in -o docker/requirements-metrics.txt
+#
+# and commit the generated .txt. The Dockerfile installs the .txt, never this file,
+# so the image can never be built from unpinned versions.
+#
+# Why this lives in the umbrella and not in the metrics repo: metrics has no
+# pyproject.toml, so there is nowhere upstream to put it yet. Moving it into the
+# repo (as a pyproject, matching its two siblings) is the better fix and is open
+# decision #2 in INTEGRATION_PLAN.md.
+#
+# Source: the imports across the repo, plus its README's install line.
+
+torch
+sae_lens          # also pulls transformer_lens, which config.py and the SAE loader use
+datasets          # corpus slice for collect_statistics.py
+safetensors       # SAE weight loading
+numpy
+matplotlib        # reporting/make_report_figures.py
+plotly            # reporting/visualize.py — the interactive dashboards
+huggingface_hub   # `hf download` for the ~700 MB/layer stat caches

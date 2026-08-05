@@ -1,0 +1,84 @@
+# SOAR I-6 — the three pipelines over one shared artifact volume.
+#
+# The shared volume is the point. PCFG writes a base model to
+# $PCFG_OUTPUT_ROOT/<experiment>/<hash>/, sae-training writes the SAE beside it at
+# <run_dir>/sae/..., and metrics reads both. That layout is a contract described in
+# prose in two READMEs; mounting one volume into all three is what makes it
+# executable rather than documentary.
+#
+#   docker compose build
+#   docker compose run --rm pcfg ./scripts/run.sh smoke
+#   docker compose run --rm sae-training uv run scripts/train_pcfg.py --run-dir ... --layer 2
+#   docker compose run --rm metrics python3 run_metrics.py
+#
+# On the compute node, add the GPU overlay:
+#   docker compose -f compose.yaml -f compose.gpu.yaml run --rm sae-training ...
+
+name: soar-i6
+
+x-common: &common
+  # Node-local scratch during a run, mirroring PCFG_SCRATCH=/dev/shm/$USER/pcfg.
+  tmpfs:
+    - /scratch
+  volumes:
+    - artifacts:/data/pcfg-experiments
+  # Raised for the activation caches; the node itself has 750GB.
+  shm_size: "8gb"
+
+services:
+  pcfg:
+    <<: *common
+    build:
+      context: .
+      dockerfile: docker/pcfg.Dockerfile
+    working_dir: /workspace/pcfg
+    environment:
+      PCFG_WANDB: "${PCFG_WANDB:-0}"
+      WANDB_PROJECT: "${WANDB_PROJECT:-pcfg-bridge}"
+      WANDB_API_KEY: "${WANDB_API_KEY:-}"
+      WANDB_MODE: "${WANDB_MODE:-offline}"
+
+  sae-training:
+    <<: *common
+    build:
+      context: .
+      dockerfile: docker/sae-training.Dockerfile
+    working_dir: /workspace/sae-training
+    volumes:
+      - artifacts:/data/pcfg-experiments
+      - hf-cache:/hf-cache
+    environment:
+      PCFG_WANDB: "${PCFG_WANDB:-0}"
+      WANDB_PROJECT: "${WANDB_PROJECT:-pcfg-bridge}"
+      WANDB_API_KEY: "${WANDB_API_KEY:-}"
+      WANDB_MODE: "${WANDB_MODE:-offline}"
+      SAE_DEVICE: "${SAE_DEVICE:-}"
+
+  metrics:
+    <<: *common
+    build:
+      context: .
+      dockerfile: docker/metrics.Dockerfile
+    working_dir: /workspace/metrics
+    volumes:
+      - artifacts:/data/pcfg-experiments
+      - hf-cache:/hf-cache
+      # Tier-2 calibration needs sae-training/configs/tree.json. Read-only: metrics
+      # reads that repo, never writes to it.
+      - ./sae-training:/workspace/sae-training:ro
+      # The contract validator, so an adapter's output can be checked in place.
+      - ./contracts:/workspace/contracts:ro
+      # Reports and dashboards land on the host, not inside a container layer.
+      - ./metrics/outputs:/workspace/metrics/outputs
+    environment:
+      EXP0_LAYER: "${EXP0_LAYER:-6}"
+      EXP0_DEVICE: "${EXP0_DEVICE:-}"
+      EXP0_OUT: "${EXP0_OUT:-}"
+      HF_TOKEN: "${HF_TOKEN:-}"
+
+volumes:
+  # Finished runs: base models, corpora, SAEs. The Docker equivalent of the node's
+  # /mnt/ssd-1/$USER/pcfg-experiments.
+  artifacts:
+  # gemma-2-2b plus the ~700 MB/layer stat caches — never re-download per service.
+  hf-cache:

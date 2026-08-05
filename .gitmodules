@@ -1,0 +1,12 @@
+[submodule "metrics"]
+	path = metrics
+	url = https://github.com/soar-eleuther-i6-hierarchy/metrics.git
+	branch = main
+[submodule "sae-training"]
+	path = sae-training
+	url = https://github.com/soar-eleuther-i6-hierarchy/sae-training.git
+	branch = main
+[submodule "PCFG"]
+	path = PCFG
+	url = https://github.com/soar-eleuther-i6-hierarchy/PCFG.git
+	branch = main

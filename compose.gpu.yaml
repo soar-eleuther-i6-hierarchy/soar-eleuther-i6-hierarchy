@@ -1,0 +1,32 @@
+# GPU overlay — for the compute node (8×A100 40GB, no SLURM).
+#
+#   docker compose -f compose.yaml -f compose.gpu.yaml run --rm sae-training ...
+#
+# The images are identical with or without this file: both locks already pin the
+# cu126 torch wheels, which run on CPU when no GPU is visible. This overlay only
+# asks Docker to expose the devices.
+#
+# Pin one GPU per process the way the node's sweeps do, by setting
+# CUDA_VISIBLE_DEVICES in the environment before invoking compose:
+#   CUDA_VISIBLE_DEVICES=1 docker compose -f compose.yaml -f compose.gpu.yaml run --rm sae-training \
+#       ./scripts/run_sae.sh sweep 1/3 --layers 2
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+  environment:
+    CUDA_VISIBLE_DEVICES: "${CUDA_VISIBLE_DEVICES:-}"
+    NVIDIA_VISIBLE_DEVICES: "${CUDA_VISIBLE_DEVICES:-all}"
+
+services:
+  pcfg:
+    <<: *gpu
+  sae-training:
+    <<: *gpu
+  metrics:
+    <<: *gpu
