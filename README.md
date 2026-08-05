@@ -38,17 +38,64 @@ git submodule update --init
 
 ## The chain
 
-One measurement, applied to SAEs from different sources:
+One measurement, applied to SAEs from different sources. Everything converges on a
+single object — the cached statistics — because every metric is a pure function over
+it. That convergence is what makes a new source an *adapter* rather than a new metric.
 
-```
-PCFG                       sae-training                    metrics
-────                       ────────────                    ───────
-generate corpus     ──►    train Matryoshka SAE     ──►    grade parent→child edges
-train transformer          on its residual stream          against the metric battery
+```mermaid
+flowchart TD
+    G["grammar config<br/><i>zipf · formatting · depth</i>"] --> CORP["corpus.bin"]
+    G --> BM["model.pt<br/><i>small transformer</i>"]
+    CORP --> PSAE["Matryoshka SAE<br/><i>sae/…hook_resid_post_L{layer}/</i>"]
+    BM --> PSAE
 
-$PCFG_OUTPUT_ROOT/<experiment>/<grammar_hash>/
-    model.pt  corpus.bin  sae/matryoshka_hook_resid_post_L{layer}/
+    GEM["gemma-2-2b<br/><i>+ released Matryoshka SAE</i>"]
+
+    PSAE --> AD["adapters/from_pcfg.py"]
+    BM --> AD
+    CORP --> AD
+    GEM --> MAIN["collect_statistics.py · main()"]
+
+    AD --> COL["collect()<br/><i>source-agnostic accumulation</i>"]
+    MAIN --> COL
+
+    COL --> ST[("exp0_stats.pt<br/><b>cached statistics</b> · schema v2")]
+
+    ST --> VAL{"contracts/<br/>validate_stats.py"}
+    VAL -->|violations| STOP["stop — wrong statistics still<br/>produce plausible numbers"]
+    VAL -->|conforms| RM["run_metrics.py<br/><i>the 10-metric battery, unchanged</i>"]
+    RM --> REP["metrics_report.json + .md"]
+
+    subgraph pcfgrepo [" PCFG · Exp 2 "]
+        G
+        CORP
+        BM
+    end
+    subgraph saerepo [" sae-training "]
+        PSAE
+    end
+    subgraph umbrella [" umbrella (this repo) "]
+        AD
+        VAL
+    end
+    subgraph metricsrepo [" metrics · Exp 0 "]
+        MAIN
+        COL
+        ST
+        RM
+        REP
+    end
+
+    classDef gate stroke-dasharray: 4 3
+    class VAL,STOP gate
 ```
+
+The two seams. **PCFG → sae-training** is the run-directory layout: the SAE is written
+*beside* the base model at `$PCFG_OUTPUT_ROOT/<experiment>/<hash>/sae/…`. **sae-training
+→ metrics** is the adapter, and it was the project's open item until now — the metric
+stages read the block structure from `metrics/config.py`, which hardcodes gemma's 32768
+latents in 5 blocks, so a PCFG dictionary (1792 in 8) was sliced at the wrong
+boundaries and still returned a full report.
 
 The experiments are not parallel studies — they are a ladder trading ground truth against realism,
 and each rung licenses the one above it:
