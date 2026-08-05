@@ -20,7 +20,7 @@ soar-eleuther-i6-hierarchy/
 ├── contracts/          the cached-statistics contract + its validator
 ├── adapters/           SAE source → cached statistics   (the integration layer)
 ├── docker/             one image per sub-repo
-└── INTEGRATION_PLAN.md how the pieces come together, and in what order
+└── compose.yaml        the three over one shared artifact volume
 ```
 
 `contracts/` and `adapters/` live here rather than in a sub-repo because both are *about the
@@ -144,14 +144,21 @@ artifact volume. See [`docker/README.md`](docker/README.md) for what those image
 
 | Piece | State |
 | --- | --- |
-| Exp 0 — metric battery | complete; 10 metrics, 3 validation tiers, 5 gemma layers, [published](https://soar-eleuther-i6-hierarchy.github.io/metrics/) |
-| Exp 2 — PCFG pipeline | corpora + base-model training complete, three sweep axes configured |
+| Exp 0 — metric battery | complete; 10 metrics, 3 validation tiers + a control, 5 gemma layers, [published](https://soar-eleuther-i6-hierarchy.github.io/metrics/) |
+| Exp 2 — PCFG pipeline | corpora + base-model training complete; 58 base models across four sweeps |
 | Exp 2 — SAE side | Matryoshka complete and wired to the PCFG run layout |
-| **Metrics handoff** | **open** — the adapter that turns a PCFG SAE into cached statistics |
+| Metrics handoff | **done** — [`adapters/from_pcfg.py`](adapters/from_pcfg.py); both metric stages now take the block structure from the stats file. Verified end to end on a real run: a 1792-latent SAE in 8 blocks over 1.02M tokens, metric code untouched |
+| **Zipf axis** | **the blocker.** Base models exist at all six exponents; SAEs exist at `1.5` only. One point is not a curve |
 | Exp 3 — cross-method | blocked: T-SAE's contrastive loss and Priors-in-Time's post-hoc clustering are unfinished |
 
-The handoff is the one open item that unblocks an experiment. See
-[`INTEGRATION_PLAN.md`](INTEGRATION_PLAN.md).
+The remaining blocker is data, not code. The cheapest thing that turns one point into a
+result is the *other extreme* rather than the full sweep — an SAE at `zipf_exponent 0.0`,
+whose base model is already trained and quality-checked.
+
+Engineering still open, none of it blocking an experiment: `contracts/validate_run_dir.py`
+for the artifact layout; `adapters/from_toy.py` and `from_tinystories.py`; a `pipeline/`
+that runs the chain end to end in one command; dashboards for non-gemma sources
+(`reporting/visualize.py` is built around gemma's block structure).
 
 ## Related
 

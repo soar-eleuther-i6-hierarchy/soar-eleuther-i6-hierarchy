@@ -62,8 +62,9 @@ Until that `.txt` is committed, `docker compose build metrics` fails — deliber
 from unpinned versions would look reproducible without being reproducible, which is worse than not
 building.
 
-The real fix is a `pyproject.toml` in the metrics repo, matching its two siblings. That is open
-decision #2 in [`INTEGRATION_PLAN.md`](../INTEGRATION_PLAN.md).
+The real fix is a `pyproject.toml` in the metrics repo, matching its two siblings — it is the only
+one of the three with no pinned dependencies, and nothing records which versions produced the
+published numbers.
 
 ## Volumes
 
