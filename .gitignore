@@ -28,3 +28,6 @@ scratch/
 
 # OS
 .DS_Store
+
+# Data pulled from the compute node for local testing (read-only copies)
+data/
