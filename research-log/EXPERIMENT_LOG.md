@@ -4,6 +4,67 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-08-06 10:15 +03 — The reconstruction threshold does not discriminate on PCFG
+
+**Question.** Every PCFG run reports 100% of candidate edges passing the reconstruction
+condition, against 0.9–42.5% on gemma. Is that a clean result, or a threshold calibrated
+for one dictionary and inert on another?
+
+**How it can be answered.** The pass mask is `parent_gain >= RECON_REL_GAIN_MIN` with the
+threshold at 0.01. Measure the actual distribution of `parent_gain` over kept edges. If the
+weakest edge sits far above 0.01, the filter is passing everything by construction and the
+100% says nothing about the edges.
+
+**What we ran.** Recomputed `edge_reconstruction_condition` over the edge set of three
+graded PCFG runs and took the distribution of `parent_gain` on kept edges.
+
+```bash
+# stats produced earlier by adapters/from_pcfg.py, thresholds from metrics/config.py
+data/fmt/f6edabf8ccde/exp0_stats.pt      # formatting 0.2400
+data/fmt/c325cc965ffa/exp0_stats.pt      # formatting 0.0000
+data/pcfg-run/exp0_stats_full.pt         # zipf 1.5
+```
+
+**Result.**
+
+| run | n edges | min gain | median | below 0.01 |
+| --- | ---: | ---: | ---: | ---: |
+| formatting 0.2400 | 357 | 0.041 | 0.337 | **0** |
+| formatting 0.0000 | 22 | 0.035 | 0.262 | **0** |
+| zipf 1.5 | 21 | 0.039 | 0.468 | **0** |
+
+The weakest edge anywhere in PCFG is 3.5× the threshold; the median is 26–47×. On gemma
+layer 6 the same threshold removes 93.7% of B0→B1 candidates.
+
+**Interpretation.** The filter is inert here, so "100% pass reconstruction" is a property of
+the threshold and not of the edges. The likely mechanism is dictionary size against model
+width: 1792 latents over `d_model` 448 versus gemma's 32768 over 2304, so a single PCFG
+latent carries far more of the representation and ablating it necessarily moves the error a
+lot. Nothing about the edges follows.
+
+This matters beyond one number. It means the filtering on PCFG is being done by **coverage
+alone** — metric 5 is idle on the zipf axis for a separate reason already logged, and metric
+2 is idle everywhere on this source. The 356 edges at density 0.24 survived one filter, not
+a battery, and should not be described as having passed the battery.
+
+It also qualifies a claim we make deliberately. Holding thresholds fixed across sources is
+the point — it is what makes "the same battery everywhere" true. But a fixed threshold on a
+quantity whose distribution shifts by an order of magnitude is not measuring the same thing,
+and the outline already records the same failure across *depth*: "fixed thresholds do not
+transfer across depth; any single global threshold is wrong somewhere." They do not transfer
+across *sources* either, and more sharply.
+
+What we cannot do is pick a better number. Calibrating `RECON_REL_GAIN_MIN` for PCFG needs
+ground truth about the SAE's features, and we only have ground truth about the grammar. This
+is a limitation to declare, not a constant to tune.
+
+**Answer.** Not a clean result. The reconstruction condition passes every PCFG edge by
+construction and carries no information on this source. Any PCFG number quoting a
+reconstruction pass rate should be reported as inert, and the surviving-edge counts should be
+attributed to coverage alone.
+
+---
+
 ## 2026-08-06 08:40 +03 — Formatting density degrades hierarchy quality; Zipfianness does not
 
 **Question.** The bottleneck-hijacking hypothesis says scarce top-block capacity gets
