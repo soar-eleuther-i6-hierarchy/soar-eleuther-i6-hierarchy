@@ -19,12 +19,14 @@ carrying two meanings.
 
     python3 adapters/from_toy.py --out /tmp/toy_stats.pt
 
-Reads `metrics/outputs/toy_trained/` and `sae-training/configs/tree.json`.
+Reads a checkpoint dir (--ckpt, default `metrics/outputs/toy_trained/`) and
+`sae-training/configs/tree.json` for the ground-truth tree.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -38,8 +40,47 @@ for p in (UMBRELLA / "metrics", UMBRELLA / "contracts"):
         sys.path.insert(0, str(p))
 
 from validation.calibrate_on_trained_toy import (  # noqa: E402
-    build_tree, load_sae, match_latents, n_features, sample, true_edges,
+    build_tree, match_latents, n_features, sample, true_edges,
 )
+
+
+def load_checkpoint(ckpt_dir: Path, n_true_features: int):
+    """Read a trained-toy checkpoint, and refuse one that is not for this toy.
+
+    Tier 2's own loader hardcodes `metrics/outputs/toy_trained`. Retraining the toy
+    -- which the Aug-1 defaults would make a different SAE, `relu` in place of
+    `batch_topk` among other changes -- writes somewhere else, so `--ckpt` has to be
+    able to follow it.
+
+    Which means the path can now be wrong, so the shape has to be checked here. A
+    checkpoint from another source with a matching `d_in` would otherwise sail past,
+    match latents against a tree it never saw, and produce a complete report of
+    meaningless edges. Pointing at a PCFG SAE happens to raise inside `match_latents`
+    because 1792x448 cannot meet 20x20 -- but that is the dimensions colliding by
+    luck, not a check.
+    """
+    from safetensors.torch import load_file
+    ckpt_dir = Path(ckpt_dir)
+    missing = [f for f in ("sae_weights.safetensors", "cfg.json") if not (ckpt_dir / f).is_file()]
+    if missing:
+        raise SystemExit(f"{ckpt_dir}: missing {', '.join(missing)}")
+
+    w = load_file(str(ckpt_dir / "sae_weights.safetensors"))
+    cfg = json.loads((ckpt_dir / "cfg.json").read_text())
+
+    absent = [k for k in ("W_enc", "W_dec", "b_enc", "b_dec") if k not in w]
+    if absent:
+        raise SystemExit(f"{ckpt_dir}: weights missing {', '.join(absent)}")
+
+    d_in = int(w["W_dec"].shape[1])
+    if d_in != n_true_features:
+        raise SystemExit(
+            f"{ckpt_dir}: this SAE has d_in={d_in}, but the toy tree in "
+            f"sae-training/configs/tree.json has {n_true_features} read-out features.\n"
+            f"      That is a checkpoint for a different world — matching its latents "
+            f"against this tree would produce edges that mean nothing."
+        )
+    return w, cfg
 
 
 class LookupModel:
@@ -98,6 +139,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", type=Path, default=Path("/tmp/toy_stats.pt"))
+    ap.add_argument("--ckpt", type=Path, default=UMBRELLA / "metrics" / "outputs" / "toy_trained",
+                    help="a trained-toy checkpoint dir (sae_weights.safetensors + cfg.json)")
     ap.add_argument("--samples", type=int, default=200_000, help="world draws (Tier 2 uses 200k)")
     ap.add_argument("--context", type=int, default=128, help="rows per pseudo-document")
     ap.add_argument("--seed", type=int, default=0)
@@ -111,7 +154,8 @@ def main() -> int:
     tree = build_tree()
     truth = true_edges(tree)
     F = n_features(tree)
-    w, sae_cfg = load_sae()
+    w, sae_cfg = load_checkpoint(args.ckpt, F)
+    print(f"[toy] checkpoint: {args.ckpt}")
     match = match_latents(w, torch.eye(F))
 
     parents = sorted({p for p, _ in truth})
