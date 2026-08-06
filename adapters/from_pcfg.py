@@ -161,7 +161,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=None, help="output .pt (default: <run-dir>/exp0_stats.pt)")
     ap.add_argument("--docs", type=int, default=64, help="corpus windows to use; 0 = all")
     ap.add_argument("--device", default="cpu", help="cpu / mps / cuda")
-    ap.add_argument("--pad-id", type=int, default=None, help="default: vocab_size-1, asserted absent")
+    ap.add_argument("--pad-id", type=int, default=None, help="default: vocab_size, asserted absent")
     args = ap.parse_args()
 
     from collect_statistics import collect  # noqa: E402  (needs the sys.path above)
@@ -178,7 +178,13 @@ def main() -> int:
     sae, sae_cfg = load_sae(sae_dir, args.device)
 
     context = int(model_cfg["context_window"])
-    pad_id = args.pad_id if args.pad_id is not None else int(model_cfg["vocab_size"]) - 1
+    # One past the vocabulary. Every window is exactly `context` long, so right_pad
+    # emits no padding and this id never reaches the embedding -- it only has to be
+    # absent from the data, because keep_mask drops every position equal to it.
+    # vocab_size-1 is NOT safe: it is DOCUMENT_DELIM, present whenever that
+    # formatting flag is on, and using it would silently delete every document
+    # boundary from the statistics.
+    pad_id = args.pad_id if args.pad_id is not None else int(model_cfg["vocab_size"])
     out_dir = args.out.parent if args.out else run_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     cfg = make_cfg(sae_cfg, args.layer, out_dir, context)
