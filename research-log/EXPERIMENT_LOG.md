@@ -4,6 +4,211 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-08-06 17:05 +03 — L24's feature 14 is a base-rate artifact, but not a frequency one
+
+**Question.** The gate entry below closes with the question the gate was the wrong instrument
+for: is the 41.9% firing rate of L24's feature 14 a finding — a genuine high-firing parent —
+or an artifact? It dominates 6 of the 8 survivors that R4 counts, so the answer changes how
+the depth claim is worded.
+
+**How it can be answered.** Read the two per-edge diagnostics on feature 14's own edges
+rather than any node-level flag. Metric 6 (`independence_scores`) asks whether the co-firing
+exceeds what the parent's base rate already forces; metric 5 (`frequency_controlled_coverage`)
+asks whether the edge survives once globally frequent tokens are removed. The prediction
+stated below was that they would agree: near-chance PMI *with* survival ≈ 0 for capture,
+healthy PMI for a real parent.
+
+**What we ran.** The layer-24 cache, `outputs/layer_24/exp0_stats.pt`, 696 MB. Edge set
+rebuilt at the shipped thresholds (`EDGE_TAU` 0.5, `MIN_FIRE_COUNT` 20, `MIN_JOINT` 30) for
+block pair B0→B1, then PMI and survival read off feature 14's kept edges.
+
+```bash
+hf download soar-eleuther-i6-hierarchy/experiment_0-stats --repo-type dataset --local-dir outputs/
+```
+
+(The run behind these numbers pulled the same file off the compute node by `scp` instead,
+from `/mnt/ssd-2/soar-hierarchy/ruqiya/experiment_0/outputs/layer_24/`. The Hub command is
+the reproducible route — it does not depend on node access or on one person's directory
+layout, and it is what the metrics README documents.)
+
+**Result.** 48,971 tokens. Feature 14 fires on **41.9%** of them, fans out to **21.9%**
+(84 of 384), and is unflagged by the shipped gate.
+
+Over its 84 kept edges:
+
+| | min | median | max |
+| --- | ---: | ---: | ---: |
+| coverage `R` | 0.501 | 0.661 | 0.952 |
+| PMI | **0.179** | **0.456** | 0.821 |
+| frequency survival | **0.723** | **0.985** | 1.429 |
+
+| | |
+| --- | --- |
+| PMI < 0.5 — at chance level | **49 / 84 (58%)** |
+| survival < 0.5 — frequency-driven | **0 / 84** |
+
+**Interpretation.** The prediction was wrong: the two diagnostics disagree, and neither of
+the two anticipated boxes is the right one.
+
+They disagree because they measure different frequencies. Survival asks whether an edge is
+carried by *globally frequent tokens* — it is not, and cleanly so; every edge holds up on the
+rare-token tail. PMI asks whether the co-firing exceeds what *the parent's own firing rate*
+already forces, and for 58% of the edges it does not. A parent firing 41.9% needs only 1.19×
+enrichment to clear `EDGE_TAU = 0.5`, where a parent firing 1% needs 50×, and the median edge
+here sits at 1.58× — above chance, but not by much.
+
+So feature 14 is a base-rate artifact without being a token-frequency artifact. That is a
+third category the question did not allow for, and it is precisely what the project means by
+"superparent": a feature active often enough to co-fire with everything by arithmetic.
+
+Two consequences for R4. The **claim survives** — a parent whose edges are majority
+chance-level, dominating 6 of 8 survivors, is not evidence of hierarchy, so the L24 collapse
+stands. The **explanation does not**: describing it as frequency capture is contradicted by
+metric 5, which exonerates every one of the 84 edges. The depth result should attribute it to
+the parent's firing rate, not to frequent tokens.
+
+It also settles the gate argument empirically rather than by reasoning. PMI already flags
+these edges, at edge granularity, which is what the entry below argued a node-level OR would
+do worse. That was an inference from thresholds; this is a measurement.
+
+**Answer.** Neither box: base-rate artifact, not frequency capture. R4's L24 collapse holds
+and its wording needs correcting. No gate change is warranted — the leak the OR was meant to
+close is already caught per edge by metric 6.
+
+**Caveats.** One feature, one block pair, one layer, 48,971 tokens. The 0.5 PMI cutoff is
+itself a fixed threshold and carries the same transfer problem logged for the reconstruction
+threshold. Whether the other four layers' busiest survivors show the same split is unchecked;
+that is the obvious next probe and needs their caches.
+
+---
+
+## 2026-08-06 15:44 +03 — The OR gate admits parents with no children, and would delete the depth result it is meant to sharpen
+
+**Question.** [`metrics/outdegree.py`](../metrics/metrics/outdegree.py#L63) records why the
+superparent gate changed: the old `AND(fan-out ≥ 30%, fires ≥ 10%)` let L24's feature 14 —
+fires on 41.9% of tokens, fans out to 21.9% of the child block — go unflagged. But the
+fan-out-only gate that shipped does not flag feature 14 either: it fails on **fan-out**, and
+fan-out is the criterion that was *kept*. Dropping the firing conjunct catches the opposite
+leak, high fan-out with low firing. Promoting it instead — an **OR** — is the other way to
+act on that same note, and it is the one not yet tested. Is the OR the better gate?
+
+**How it can be answered.** An OR is a claim about a classifier, so test it as one: run all
+three gates over every graded run we hold and look at what the OR actually admits.
+`outdegree.py` defines a superparent as "one parent holding most of the next block's
+in-edges". A gate that admits parents holding *no* in-edges is not detecting that
+pathology, whatever else it detects.
+
+**What we ran.** All thirteen graded PCFG runs we hold — the twelve formatting-sweep runs
+(4 densities × 3 seeds, layer 2) plus the zipf 1.5 run (layer 1). Edge sets rebuilt from the
+cached statistics with `coverage_legs` + `keep_edges` at the shipped thresholds (`EDGE_TAU`
+0.5, `MIN_FIRE_COUNT` 20, `MIN_JOINT` 30), then all three gates applied to the same masks,
+so the gates are the only thing that differs. 1,022,000 tokens per run, 1792 latents in 8
+blocks, 7 block pairs each — 91 (run × pair) cells.
+
+```bash
+python3 pipeline/superparent_gate_table.py --data data/fmt data/pcfg-run
+```
+
+Runs: `c325cc965ffa` (density 0.0), `3915659d6f6c` (0.1667), `f98ccd6c7355` (0.2308),
+`f6edabf8ccde` (0.24), each with `-s1` / `-s2`; plus `data/pcfg-run` (zipf 1.5), which is
+graded from `exp0_stats_full.pt` rather than the 200-window `exp0_stats.pt` beside it.
+
+**Result.** Counts are parent-slots summed over the 7 block pairs.
+
+| run | fan-out alone (ships) | AND (old) | OR | OR-only adds | of those, childless |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| fmt 0.0000 s0/s1/s2 | 0 · 0 · 1 | 0 · 0 · 1 | 87 · 68 · 78 | 232 | 202 |
+| fmt 0.1667 s0/s1/s2 | 0 · 0 · 2 | 0 · 0 · 2 | 118 · 98 · 103 | 317 | 287 |
+| fmt 0.2308 s0/s1/s2 | 1 · 0 · 0 | 1 · 0 · 0 | 91 · 115 · 97 | 302 | 276 |
+| fmt 0.2400 s0/s1/s2 | 2 · 0 · 1 | 2 · 0 · 1 | 66 · 102 · 134 | 299 | 258 |
+| zipf 1.5 | 0 | 0 | 100 | 100 | 89 |
+| **total** | **7** | **7** | **1257** | **1250** | **1112 (89.0%)** |
+
+Fan-out of the 1250 additions: median **0.000%**, mean 0.269%. Only 138 (11.0%) have any
+child at all; 53 (4.2%) exceed 1% fan-out; 12 (1.0%) exceed 10%; 2 exceed 20%. The single
+closest call anywhere is 29.0%, just under the threshold.
+
+Two things fall out that were not the question. The old AND gate and the shipped fan-out
+gate give **identical counts on all thirteen runs** — on PCFG every parent clearing 30%
+fan-out also fires ≥ 10%. And the shipped gate flags 7 parent-slots in 91 (run × pair)
+cells: superparents are near-absent on PCFG at any setting.
+
+**The same two gates on gemma.** PCFG is one source, and a gate is meant to hold across
+all of them, so the five published gemma layers were checked too — from the committed
+reports, which carry `outdeg_frac` and `fire_frac` per flagged parent:
+
+| layer | flagged (listed) | fire ≥ 10% | fire < 10% | fan-out range | fire range |
+| --- | ---: | ---: | ---: | --- | --- |
+| L03 | 8 | 8 | **0** | 38.3–99.7% | 30.4–99.3% |
+| L06 | 24 | 24 | **0** | 46.1–99.7% | 10.1–99.0% |
+| L12 | 5 | 5 | **0** | 31.0–100% | 38.2–98.8% |
+| L18 | 15 | 15 | **0** | 34.1–100% | 10.3–98.9% |
+| L24 | 15 | 15 | **0** | 32.8–100% | 11.6–99.5% |
+| **total** | **67** | **67** | **0** | | |
+
+Not one flagged gemma superparent fires under 10%. So AND and fan-out-alone agree on gemma
+as well, over 67 of the 72 flagged parents — reports list the top 10 per pair, and the 5
+unlisted have the lowest out-degree of their pair, so this is not quite exhaustive.
+
+The OR arm **cannot** be computed on gemma from committed artifacts. Its additions are by
+definition parents with fire ≥ 10% and fan-out < 30%, and those appear in no report — the
+reports only list parents the gate already flagged. Measuring it needs
+`outputs/layer_NN/exp0_stats.pt`, which is not in the repo.
+
+**Interpretation.** The OR inflates the count 180× on PCFG and 89% of what it adds has no
+children at all. It is not a stricter superparent detector; it is a firing-rate threshold
+wearing the superparent label, and it would make `n_superparents` mean "frequent feature" on
+PCFG and "fans out widely" on gemma — one field, two meanings, which is the failure the
+block-indices work was done to avoid.
+
+The stronger objection is structural, and it holds on every source because it is in the
+code rather than the data. Flagging is not inert:
+[`validation/qualitative_check.py:169`](../metrics/validation/qualitative_check.py#L169)
+builds the survivor set as `em & passes & survive & ~sp_locals`, and flagged parents are
+re-filed under `reject:superparent`. Any figure quoted over survivors therefore moves when
+the gate moves. The depth comparison is exactly such a figure: it reports the busiest
+*surviving* parent's firing rate per layer, and at L24 that parent is feature 14 at 41.9% —
+which is a survivor **because** it is unflagged. Implement the OR and it lands in the reject
+bucket, the L24 figure is replaced by the next survivor, and the distinct-parent count
+changes with it. The OR does not sharpen the evidence for collapse at depth; it removes it,
+by definition rather than by measurement.
+
+Nor is the firing leak unaddressed today, which is the natural way to describe it if the OR
+is declined. At `EDGE_TAU = 0.5` a parent firing 41.9% needs only 1.19× enrichment over
+chance to clear the bar, where a parent firing 1% needs 50×; that asymmetry is exactly what
+metric 3 measures. An edge from feature 14 that just clears the bar has
+`pmi = ln(0.5/0.419) = 0.18` nat, under the `< 0.5` cutoff `run_metrics.py` already counts as
+`n_chance_level` and labels a "C-freq artifact". The leak is caught — per edge, which is the
+right granularity, since frequency spoils particular edges and not a whole feature.
+
+**Answer.** No. Keep fan-out alone; do not implement the OR. Report the firing criterion as
+*deliberately excluded from the node-level gate and handled per edge by metrics 3 and 5*,
+rather than as an unaddressed leak. Separately, the shipped fan-out-only change should not
+be described as fixing the case it cites: it is a no-op against both gates' agreement on
+every source we can measure — 13/13 PCFG runs and 67/67 flagged gemma parents — and feature
+14 stays unflagged under it.
+
+This does not settle whether the L24 41.9% is a finding or an artifact. That is a separate,
+answerable question, and the gate is the wrong instrument for it. Read PMI and frequency
+survival on feature 14's own edges: near-chance PMI with survival ≈ 0 means the figure was
+frequency capture and the depth claim needs rewording; healthy PMI means feature 14 is a
+genuine high-firing parent, the claim stands, and flagging it would have deleted a true
+result. That check needs `metrics/outputs/layer_24/exp0_stats.pt`, which is not in the repo
+— it is the `[02] WAIT` in `run_pipeline.py --list`, so it is a compute-node run.
+
+Caveats, and the largest is the source. **The decisive column — 89% of OR's additions have
+no children — is PCFG only.** It could not be computed on gemma, because the additions are
+precisely the parents no report lists. What gemma does establish is narrower and from
+committed data: the AND and fan-out-only gates agree there too, so the shipped change is
+inert on both sources. The 180× inflation is measured where superparents are near-absent to
+begin with (7 slots in 91 cells), so the gemma inflation factor is unknown and could differ
+in either direction. The `~sp_locals` and PMI arguments are read from the code and hold on
+any source; the counts are not. Closing the gap needs stage 01 re-run for one gemma layer —
+gemma-2-2b, the released Matryoshka SAE and pile-10k, 400 docs × 128 ctx — and until it is
+run, the recommendation rests on one source plus two source-independent arguments.
+
+---
+
 ## 2026-08-06 12:40 +03 — Tier 2 reaches the same verdict through the production path
 
 **Question.** Tier 2's precision 1.00 / recall 0.67 is the only published number with both
