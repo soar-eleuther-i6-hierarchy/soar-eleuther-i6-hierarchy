@@ -4,6 +4,150 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-08-06 19:20 +03 — The depth-degradation result was a BOS contamination artifact
+
+**Question.** The published depth numbers were produced on 18 July; the superparent gate
+changed on 24 July in `a266f8c`. Do they survive regeneration under the current code?
+
+**How it can be answered.** Re-run the pipeline from stage 01 on all five layers and compare.
+An earlier attempt re-ran only stages 02 and 02b against the *same* cache and found nothing
+changed — which proved only that stage 02's thresholds are not what moves, since the input
+was identical. The cache itself has to be rebuilt.
+
+Inspecting it showed why that matters: the shipped caches carry no `schema_version`,
+`bos_excluded` is `None`, and the energy/union accumulators are absent. They are **v1** —
+written before BOS exclusion.
+
+**What we ran.** A fresh clone of `main` on the compute node, all five layers, GPU 3:
+
+```bash
+EXP0_LAYER=$L python3 run_pipeline.py --only 01 02 02b
+```
+
+L24 was additionally run twice, from `aed1e1a` and from `17326db`, to check the result does
+not depend on which merge the code sits at. Identical both times.
+
+**Result.** Every layer's token count drops 48,971 → 48,571, exactly 400 — the document
+count, one BOS each.
+
+Candidate counts collapse on **all five** layers, not only L24:
+
+| layer | B0→B1 | B1→B2 | B2→B3 |
+| --- | --- | --- | --- |
+| L3 | 3,067 → 1,971 | 28,588 → 1,387 | 274,313 → **4,379** |
+| L6 | 8,156 → 2,428 | 271,644 → **280** | 4,704,312 → **762** |
+| L12 | 3,262 → 1,473 | 34,142 → 621 | 431,127 → 1,747 |
+| L18 | 4,901 → 1,129 | 141,272 → 1,748 | 3,820,801 → **4,195** |
+| L24 | 4,940 → 2,273 | 108,810 → **424** | 3,695,288 → **4,867** |
+
+B2→B3 at L6 falls by a factor of 6,173.
+
+The reconstruction pass rate inverts with it — B0→B1: L3 42.5→**89.8%**, L6 6.3→**85.9%**,
+L12 16.3→53.9%, L18 7.3→74.8%, L24 17.8→**73.6%**. Deep pairs go from 0.0% to 9–41%.
+
+Distinct parents among the 8 survivors, B0→B1:
+
+| | L3 | L6 | L12 | L18 | **L24** |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| v1 (published) | 5 | 7 | 6 | 7 | **2** |
+| v2 (regenerated) | 5 | 7 | 6 | 7 | **6** |
+
+Busiest surviving parent's share:
+
+| | L3 | L6 | L12 | L18 | **L24** |
+| --- | --- | --- | --- | --- | --- |
+| v1 | 1/8 | 1/8 | 1/8 | 2/8 | **6/8** |
+| v2 | 1/8 | 1/8 | 2/8 | 2/8 | **2/8** |
+
+Its firing rate moves in both directions and shows no depth trend: L6 20.5→14.0%,
+L12 15.5→11.0%, L18 18.2→**33.8%**, L24 41.9→27.0%.
+
+**Every metric that reads co-firing moves, and in the same direction.** B0→B1:
+
+| | frequency-driven edges | | mean survival | | sibling redundancy | |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| | v1 | v2 | v1 | v2 | v1 | v2 |
+| L3 | 28.4% | **0.9%** | 0.758 | **1.040** | 0.229 | **0.059** |
+| L6 | **60.8%** | **1.0%** | 0.441 | **1.031** | 0.351 | **0.054** |
+| L12 | 43.8% | **1.9%** | 0.594 | 0.998 | 0.273 | **0.033** |
+| L18 | **65.2%** | **1.3%** | 0.396 | **1.004** | 0.340 | **0.042** |
+| L24 | 53.3% | **2.2%** | 0.517 | 0.994 | 0.350 | **0.060** |
+
+Both follow from the same cause. BOS is a *single token id*, so it lands in the
+high-frequency bucket — which made every edge look carried by frequent tokens, and made
+every pair of children look co-active. Removing it takes frequency-driven edges from a
+majority to ~1% and cuts sibling redundancy six-fold.
+
+Joint-child coverage could not be compared: `energy_cofire` / `union_*` do not exist in v1,
+so metrics 1c, 8 and 9 were **never computed on gemma**. Now they are, and they are
+saturated — `R_supp` and `R_mass` both ≈ 1.000 at every layer, i.e. a parent's children
+jointly cover it entirely in both support and mass. Only L18 shows anything: 9 parents where
+one child holds ≥90% of the parent's energy, the rename/split signature.
+
+`n_chance_level` is computed in `run_metrics.py` but is absent from the emitted report on
+both sides, so the independence null could not be compared here at all.
+
+Multi-parenting is the one figure that does **not** move: 99.0 / 100 / 99.7 / 88.8 / 100%
+against 99.7 / 100 / 99.7 / 94.3 / 100% before. It is a ratio over children that have a
+parent at all, so deleting phantom pairs leaves it alone.
+
+**Interpretation.** BOS is an attention sink, so every feature fires there. With 400 BOS
+positions in the corpus, every pair in the dictionary received 400 joint firings for free —
+and `MIN_JOINT` is 30. The joint-support guard was therefore satisfied by BOS alone for
+**every pair**, which is what produced 3.7M "candidates" at B2→B3 and what kept feature 14's
+edges alive at L24.
+
+The candidate sets were mostly phantom. Which means the headline framing — coverage proposes
+far more than survives — was measuring the phantoms: the 94–99.9% that "died" were pairs that
+should never have been candidates. Corrected, the majority of B0→B1 candidates now *pass*
+reconstruction, and the deep pairs carry a real if small signal instead of exactly zero.
+
+On depth: four layers' distinct-parent counts do not move, and L24 moves all the way to the
+others' value. The pattern was one outlier and the outlier was contamination. Corrected, the
+counts read 5 · 7 · 6 · 7 · 6 — flat.
+
+Why only L24's survivor structure moved, when every layer's candidate set collapsed, is
+unexplained. The plausible story is that earlier layers' features fire often enough to clear
+`MIN_JOINT` on their own, while at L24 they are sparse enough that BOS was carrying feature
+14's edges by itself. That is a hypothesis, not a measurement.
+
+**Answer.** No. Three of the four published claims do not survive:
+
+| claim | after regeneration |
+| --- | --- |
+| coverage over-proposes; 94–99.9% of edges die | **inverted** — 74–90% of B0→B1 candidates now pass |
+| deep block pairs carry no signal | **inverted** — B2→B3 passes 9–41%, not 0.0% |
+| quality degrades with depth | **gone** — no trend |
+| it is not a tree | **holds** — 89–100% of children have ≥2 parents |
+
+Every metric that reads the co-firing matrix moved: coverage, reconstruction, frequency
+control (60.8% → 1.0% at L6), sibling redundancy (six-fold down), superparents. The one that
+holds is the one that does not depend on the candidate set — multi-parenting is a ratio over
+children that already have a parent.
+
+That is the shape of the whole result. A single contaminating token inflated one matrix, and
+five of six metrics read that matrix. This is also, in retrospect, what the metrics-battery
+design was supposed to protect against: independent detectors that fail independently. They
+did not fail independently, because they share an input.
+
+**Caveats.** The regenerated caches use the same corpus slice, thresholds and SAE as the
+originals, so BOS exclusion is the only intended difference; verified by comparing the
+recorded `config` blocks. Stage 03 and the in-block metric have still not been run on any
+layer. The qualitative reading of survivor labels has not been redone, so whether the new
+survivors are semantically coherent is unknown — the numbers moved, the human check has not
+been repeated.
+
+**A note on how this was nearly missed.** Three separate times today a committed artifact was
+read as though it were fresh output: re-running stages 02/02b against an unchanged cache and
+declaring the question closed; L12 and L18 showing reports that came from the clone; and L3
+compared against itself, which produced a spurious "L3 was never contaminated" reading that
+survived until the token count was checked. `run_pipeline.py` exists to refuse exactly this
+and was used for only the last of the five layers. The lesson is not "be careful" — it is
+that output directories under version control need the guard, because a stale file there is
+indistinguishable from a fresh one by inspection.
+
+---
+
 ## 2026-08-06 17:05 +03 — L24's feature 14 is a base-rate artifact, but not a frequency one
 
 **Question.** The gate entry below closes with the question the gate was the wrong instrument
