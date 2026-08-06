@@ -127,6 +127,25 @@ def block_lengths(block_ranges) -> list[int]:
     return [int(end) - int(start) for start, end in block_ranges]
 
 
+def block_sizes(cfg) -> tuple[list[int], int, bool]:
+    """Per-block feature counts, the dictionary size, and which form was used.
+
+    A block is a set of feature indices. Matryoshka's are contiguous prefixes, so
+    `block_ranges` describes them; a source whose groups are not contiguous — the
+    trained toy indexes by which true feature each latent recovered — declares
+    `block_indices` instead, and it wins when both are present.
+    """
+    idx = cfg.get("block_indices")
+    if idx is not None:
+        # d_sae is NOT derivable here. Index blocks need not cover the dictionary —
+        # the trained toy groups only the latents that matched a true feature, and
+        # leaves the rest out — so `fire_count` is longer than the blocks. Return
+        # None and let the caller check every index against its actual length.
+        return [len(ix) for ix in idx], None, True
+    ranges = cfg["block_ranges"]
+    return block_lengths(ranges), int(ranges[-1][1]), False
+
+
 # Reconstruction gains are signed: ablating a feature can *improve* the
 # reconstruction, which is a negative gain and a real measurement, not corruption.
 # Everything else here is a count or a sum of magnitudes and must stay >= 0.
@@ -243,17 +262,46 @@ def validate_full(stats: dict) -> Report:
         if k not in cfg:
             rep.err(f"config: missing field {k!r}")
 
-    block_ranges = cfg.get("block_ranges")
-    if not block_ranges:
-        rep.err("config.block_ranges: missing — this is what makes the object source-agnostic")
+    if not cfg.get("block_ranges") and not cfg.get("block_indices"):
+        rep.err("config: needs block_ranges or block_indices — this is what makes "
+                "the object source-agnostic")
         return rep
 
-    blen = block_lengths(block_ranges)
-    d_sae = int(block_ranges[-1][1])
+    blen, d_sae, by_index = block_sizes(cfg)
     n_blocks = len(blen)
 
+    if by_index:
+        seen: dict[int, int] = {}
+        for b, ix in enumerate(cfg["block_indices"]):
+            if len(set(ix)) != len(ix):
+                rep.err(f"config.block_indices[{b}]: contains duplicate feature ids")
+            for f in ix:
+                # A feature in two blocks would be counted as both parent and child
+                # of itself somewhere, and no metric could tell.
+                if f in seen:
+                    rep.err(f"config.block_indices: feature {f} appears in blocks "
+                            f"{seen[f]} and {b}")
+                    break
+                seen[f] = b
+
     K = check_common(rep, stats)
-    check_tensor(rep, stats.get("fire_count"), "fire_count", (d_sae,))
+    fire = stats.get("fire_count")
+    indices_usable = True
+    if by_index:
+        # Blocks need not cover the dictionary, so only the indices are checkable.
+        check_tensor(rep, fire, "fire_count")
+        if isinstance(fire, torch.Tensor):
+            n = int(fire.numel())
+            for b, ix in enumerate(cfg["block_indices"]):
+                bad = [f for f in ix if not (0 <= int(f) < n)]
+                if bad:
+                    rep.err(f"config.block_indices[{b}]: {bad[:4]} out of range for "
+                            f"fire_count of length {n}")
+                    indices_usable = False
+        else:
+            indices_usable = False
+    else:
+        check_tensor(rep, fire, "fire_count", (d_sae,))
 
     pairs = stats.get("pairs")
     if not isinstance(pairs, (list, tuple)) or not pairs:
@@ -289,7 +337,13 @@ def validate_full(stats: dict) -> Report:
         if isinstance(cof, dict) and key in cof and isinstance(fire, torch.Tensor):
             m = cof[key]
             if isinstance(m, torch.Tensor) and tuple(m.shape) == (blen[p], blen[c]):
-                fire_p = fire[block_ranges[p][0] : block_ranges[p][1]].double()
+                if by_index and not indices_usable:
+                    continue          # already reported; indexing with them would crash
+                elif by_index:
+                    fire_p = fire[torch.as_tensor(cfg["block_indices"][p], dtype=torch.long)].double()
+                else:
+                    r = cfg["block_ranges"][p]
+                    fire_p = fire[int(r[0]) : int(r[1])].double()
                 if (m.double() > fire_p[:, None] + 1e-6).any():
                     rep.err(f"cofire[{key}]: co-firing exceeds the parent's own fire count")
 
