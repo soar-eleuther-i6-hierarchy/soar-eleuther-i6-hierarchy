@@ -92,21 +92,66 @@ def load_sae(sae_dir: Path, device: str):
     return PCFGMatryoshkaSAE(weights, cfg, device), cfg
 
 
-def load_corpus_seqs(corpus_path: Path, context: int, n_docs: int, pad_id: int):
-    """Cut the flat uint16 token stream into fixed-length windows.
+EOS_ID = 1000
+
+
+def document_starts(tokens: np.ndarray, sentences_per_doc: int) -> np.ndarray | None:
+    """Offsets where each document begins, or None when the stream has no markers.
+
+    The generator emits `EOS` after every sentence and a document is exactly
+    `sections × paragraphs_per_section × sentences_per_paragraph` sentences, so every
+    Nth EOS ends a document. With `formatting.eos` off there is no marker at all and
+    documents cannot be located.
+    """
+    eos = np.flatnonzero(tokens == EOS_ID)
+    if eos.size < sentences_per_doc:
+        return None
+    ends = eos[sentences_per_doc - 1 :: sentences_per_doc]
+    return np.concatenate([[0], ends[:-1] + 1])
+
+
+def load_corpus_seqs(corpus_path: Path, context: int, n_docs: int, pad_id: int,
+                     sentences_per_doc: int | None = None):
+    """Cut the token stream into windows that lie **inside a single document**.
+
+    This matters for the within-context frequency control and for nothing else. The
+    generator re-permutes which token id holds which Zipf rank per document, so
+    "frequent in this context" is only meaningful inside one document — a window
+    spanning a boundary mixes two permutations and dilutes exactly the concentration
+    the zipf knob creates. Documents here run ~385 tokens against a 512-token context,
+    so naive fixed windows crossed a boundary 100% of the time.
+
+    Windows start at document boundaries and share one length, so no padding is ever
+    emitted (there is no spare id in this vocabulary to pad with). Documents longer
+    than that length are truncated; the tail is dropped, uniformly.
 
     collect() drops position 0 of every sequence -- for gemma that is BOS, whose
-    residual is an attention-sink outlier that would contaminate every count. A
-    PCFG corpus has no BOS, so this costs one real token per window (~0.2% at
-    context 512). Uniform across windows, so it biases nothing.
+    residual is an attention-sink outlier that would contaminate every count. A PCFG
+    corpus has no BOS, so this costs one real token per window. Uniform, so it biases
+    nothing.
     """
-    tokens = np.memmap(corpus_path, dtype=np.uint16, mode="r")
-    usable = (tokens.shape[0] // context) if n_docs <= 0 else min(n_docs, tokens.shape[0] // context)
-    if usable == 0:
-        raise SystemExit(f"corpus too short: {tokens.shape[0]} tokens < context {context}")
+    tokens = np.asarray(np.memmap(corpus_path, dtype=np.uint16, mode="r"), dtype=np.int64)
+
+    starts = document_starts(tokens, sentences_per_doc) if sentences_per_doc else None
+    if starts is None or starts.size < 2:
+        # No document markers (formatting.eos off): fall back to fixed windows and say
+        # so, because the local frequency control is diluted in this mode.
+        print("[pcfg] WARNING: no document markers — fixed windows; within-context "
+              "frequency control will span document boundaries")
+        span = context
+        starts = np.arange(0, tokens.shape[0] - span, span)
+    else:
+        lengths = np.diff(np.concatenate([starts, [tokens.shape[0]]]))
+        span = int(min(context, lengths[:-1].min()))
+        print(f"[pcfg] documents: {starts.size} found, median {int(np.median(lengths[:-1]))} tokens "
+              f"-> windows of {span} inside one document")
+
+    usable = starts.size if n_docs <= 0 else min(n_docs, starts.size)
     seqs = []
-    for i in range(usable):
-        w = np.asarray(tokens[i * context : (i + 1) * context], dtype=np.int64)
+    for s in starts[:usable]:
+        w = tokens[s : s + span]
+        if w.shape[0] < span:
+            break
         if (w == pad_id).any():
             raise SystemExit(
                 f"pad id {pad_id} occurs in the corpus; pick one outside the vocabulary "
@@ -116,7 +161,7 @@ def load_corpus_seqs(corpus_path: Path, context: int, n_docs: int, pad_id: int):
     return seqs
 
 
-def make_cfg(sae_cfg: dict, layer: int, out_dir: Path, context: int):
+def make_cfg(sae_cfg: dict, layer: int, out_dir: Path, context: int, local_freq: bool = False):
     """Block structure and thresholds for THIS SAE, not gemma's.
 
     collect(cfg=...) exists for this: metrics/config.py hardcodes a 32768-feature
@@ -147,6 +192,10 @@ def make_cfg(sae_cfg: dict, layer: int, out_dir: Path, context: int):
         N_FREQ_BUCKETS=3,
         FREQ_HIGH_MASS=0.50,
         FREQ_MID_MASS=0.40,
+        # Accumulate a second frequency control bucketed within each window. The
+        # zipf knob concentrates tokens inside a document but not across the corpus,
+        # so the global control is blind to it; this is what sees it.
+        LOCAL_FREQ_BUCKETS=local_freq,
         MIN_JOINT=30,
         CACHE_RESIDUALS=False,
         TOKEN_CACHE_DIR=out_dir / "token_cache",
@@ -162,6 +211,8 @@ def main() -> int:
     ap.add_argument("--docs", type=int, default=64, help="corpus windows to use; 0 = all")
     ap.add_argument("--device", default="cpu", help="cpu / mps / cuda")
     ap.add_argument("--pad-id", type=int, default=None, help="default: vocab_size, asserted absent")
+    ap.add_argument("--local-freq", action="store_true",
+                    help="also accumulate the frequency control bucketed within each window")
     args = ap.parse_args()
 
     from collect_statistics import collect  # noqa: E402  (needs the sys.path above)
@@ -187,7 +238,7 @@ def main() -> int:
     pad_id = args.pad_id if args.pad_id is not None else int(model_cfg["vocab_size"])
     out_dir = args.out.parent if args.out else run_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    cfg = make_cfg(sae_cfg, args.layer, out_dir, context)
+    cfg = make_cfg(sae_cfg, args.layer, out_dir, context, local_freq=args.local_freq)
 
     grammar = {}
     manifest = run_dir / "manifest.json"
@@ -200,8 +251,19 @@ def main() -> int:
     if grammar:
         print(f"[pcfg] zipf={grammar.get('zipf_exponent')} sections={grammar.get('sections')}")
 
-    seqs = load_corpus_seqs(run_dir / "corpus.bin", context, args.docs, pad_id)
-    print(f"[pcfg] corpus: {len(seqs)} windows x {context} tokens\n")
+    # A document is sections x paragraphs_per_section x sentences_per_paragraph
+    # sentences, and every sentence ends with EOS -- that is how windows get aligned
+    # to document boundaries.
+    spd = None
+    if grammar:
+        try:
+            spd = int(grammar["sections"]) * int(grammar["paragraphs_per_section"]) \
+                  * int(grammar["sentences_per_paragraph"])
+        except (KeyError, TypeError, ValueError):
+            spd = None
+    seqs = load_corpus_seqs(run_dir / "corpus.bin", context, args.docs, pad_id,
+                            sentences_per_doc=spd)
+    print(f"[pcfg] corpus: {len(seqs)} windows x {len(seqs[0])} tokens\n")
 
     collect(
         model,
