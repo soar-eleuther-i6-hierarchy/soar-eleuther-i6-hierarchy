@@ -4,6 +4,81 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-08-06 12:40 +03 — Tier 2 reaches the same verdict through the production path
+
+**Question.** Tier 2's precision 1.00 / recall 0.67 is the only published number with both
+ground truth and a real training run behind it, but it is produced by a bespoke path:
+`calibrate_on_trained_toy.py` calls the metric functions directly with thresholds written
+into the script, and never touches `collect()`, `run_metrics.py` or the contract. Does the
+production path reach the same verdict?
+
+**How it can be answered.** Route the same checkpoint through the real pipeline and compare
+the surviving edge set, not just the two summary figures — matching figures with different
+edges would be coincidence. If they agree, that number covers the accumulation and the
+report as well, and the pipeline gains its only end-to-end check against a known answer.
+
+Getting there needed one change first: the toy's groups are not contiguous. It indexes by
+which true feature each latent recovered, so parents and children are scattered lists
+(`[0, 3, 8]` and `[5, 7, 9, 10, 11, 14, 17]`). `collect()` sliced blocks as ranges. The
+alternative to generalising it was permuting the dictionary until the groups were
+contiguous, which would have made `B0→B1` mean "true parents → true children" here and
+"first 128 → next 384" on gemma — one field name with two meanings and nothing in the file
+to say so.
+
+**What we ran.**
+
+Inputs, both committed and therefore reproducible from a clone:
+
+| | |
+| --- | --- |
+| checkpoint | `metrics/outputs/toy_trained/{sae_weights.safetensors,cfg.json}` — trained 2026-07-24, `d_in=d_sae=20`, `batch_topk` `k=2`, saved threshold 4.5e-5 |
+| ground-truth tree | `sae-training/configs/tree.json` — 20 read-out features, 9 true edges |
+
+```bash
+# production path — the .pt is a scratch artifact, regenerate rather than keep
+python3 adapters/from_toy.py --out "$(mktemp -d)/toy_stats.pt"     # 200k draws, seed 0
+
+# reference path, unchanged
+cd metrics && python3 validation/calibrate_on_trained_toy.py
+```
+
+200,000 world draws collapse to 1,337 distinct states; 199,936 tokens after position 0 is
+dropped; 17 of 20 features alive. Nothing is written to either repo — the stats file is
+derived and both inputs are in git, so the run is reproducible without carrying 19 MB
+around.
+
+**Result.** Identical, edge for edge.
+
+| | production path | reference path |
+| --- | --- | --- |
+| surviving edges | (0,1) (0,2) (4,5) (4,7) (8,9) (8,10) | same six |
+| precision | **1.00** | 1.00 |
+| recall | **0.67** | 0.67 |
+| false positives | 0 | 0 |
+| missed | (0,3) (4,6) (8,11) | same three |
+
+Guards, checked separately: a missing path, a checkpoint from another world (`d_in=448`
+against the toy's 20), and weights with keys removed are all refused with a specific
+message. Seed 0 twice is byte-identical; seed 0 against seed 1 differs.
+
+**Interpretation.** The two paths differ in more than plumbing, which is what makes the
+agreement worth something. Thresholds come from `config.py` on one and from literals in the
+script on the other. The token encoding differs outright: the reference uses
+`fired.argmax(1)` as a stand-in token, the adapter enumerates distinct world states, so
+metric 5's buckets are over different objects. Reaching the same six edges through both says
+the result is not sensitive to either — which was not previously established.
+
+What this does **not** show: that the pipeline is correct in general. It shows that on one
+20-feature toy with a known tree, the accumulation and the report preserve a verdict the
+metrics already produced. gemma and PCFG remain unchecked against any known answer, because
+neither has one.
+
+**Answer.** Yes. The production path reproduces Tier 2 exactly, so 1.00 / 0.67 now validates
+`collect()` and `run_metrics.py` as well as the metric functions. It is the only number in
+the project that can do that.
+
+---
+
 ## 2026-08-06 10:15 +03 — The reconstruction threshold does not discriminate on PCFG
 
 **Question.** Every PCFG run reports 100% of candidate edges passing the reconstruction

@@ -34,6 +34,41 @@ a test, a contract. "Be careful next time" is not prevention.
 
 ---
 
+## 2026-08-06 — The validator inferred a dictionary size that does not exist
+
+**Symptom.** `validate_stats.py` rejected a correct stats file:
+`fire_count: expected shape (10,), got (12,)`.
+
+**How it surfaced.** The first run of the new index-block path, on a deliberately
+built stub — before any real file used it.
+
+**Root cause.** Extending the contract to allow `block_indices`, I derived the
+dictionary size the same way the range form does — from the blocks. `d_sae` became
+`max(index) + 1`.
+
+That holds for `block_ranges`, where blocks tile the dictionary by construction. It
+does not hold for index blocks, and the reason is the whole point of them: the
+trained toy groups only the latents that **matched a true feature** and leaves the
+rest out. Seventeen of twenty latents matched, so the blocks cover 17 features
+while `fire_count` is over all 20. A dictionary is longer than its blocks, and
+nothing in the file says how much longer.
+
+**Blast radius.** None. Caught on the first stub run, before the toy adapter or any
+real checkpoint went through it.
+
+**Fix.** `block_sizes()` returns `None` for `d_sae` in the index form, and the
+caller checks each index against `fire_count`'s actual length instead. A second
+guard came out of the same reading: no feature may appear in two blocks, since it
+would be counted as parent and child of itself somewhere and no metric could tell.
+
+**Prevention.** Already in place, and it worked: the validator is exercised against
+data known to be good, not only against corruption. This is the third time that
+has caught a wrong **spec** rather than wrong data — the `g_parent_sum` sign check
+and the stub test's own pad id were the others. A validator that has never been run
+against something correct is untested in the direction that matters.
+
+---
+
 ## 2026-08-06 — Default pad id was the document delimiter
 
 **Symptom.** None, by design of the guard. Without it: every document boundary would
