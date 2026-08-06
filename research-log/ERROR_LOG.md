@@ -7,10 +7,36 @@ teaches you something once; a wrong number that looks right can survive into a p
 Each entry therefore records *how it surfaced* — and when the honest answer is "it did
 not, we went looking", that is the most useful line in the entry.
 
+## Status
+
+Every heading carries one of `fixed` · `open` · `blocked`, so `grep '^## '` shows what is
+still live without opening anything.
+
+The status tracks the **blast radius, not the commit**. An entry is `fixed` when the affected
+results are known-good again — not when the code changed. Those come apart: BOS exclusion
+landed in the code long before the numbers it had corrupted were regenerated and re-read, and
+an entry marked `fixed` on the strength of the commit would have said the opposite of the
+truth for that whole stretch. The question this log answers is *which of my results should I
+distrust*, and a code diff does not answer it.
+
+Consequences worth stating, since they are what make the field cost something:
+
+- **`open` and `blocked` must carry a `Closes when:` line** naming a condition someone else
+  could check. Without one the status is a mood.
+- **`blocked` must name what it is blocked on.** If that is a person or a machine, say so.
+- **An entry cannot be `fixed` while its Prevention is a promise.** "Be careful" was already
+  disallowed; the status is what makes it enforceable.
+
+Not `WIP`: that claims someone is working on it right now, and turns into a lie the moment
+you look away for a week. `open` is true whether or not anyone is on it.
+
+If `open` ever stops being rare, the field has stopped meaning anything — that is the failure
+mode to watch, not stale wording.
+
 ## The template
 
 ```markdown
-## YYYY-MM-DD — <short title>
+## YYYY-MM-DD — <short title>   `fixed` | `open` | `blocked`
 
 **Symptom.** What was observed. If nothing was observed, say what would have been
 believed instead, and for how long.
@@ -29,12 +55,79 @@ know. Name the runs.
 **Prevention.** What now makes this class of error loud instead of silent — a guard,
 a test, a contract. "Be careful next time" is not prevention.
 
+**Closes when.** Required unless `fixed`. A condition someone else could check.
+
 ---
 ```
 
 ---
 
-## 2026-08-06 — The validator inferred a dictionary size that does not exist
+## 2026-08-06 — BOS satisfied the joint-support guard for every pair in the dictionary   `open`
+
+**Symptom.** None. Five layers of results, a published site, and four claims — three of which
+were false. Believed for 19 days, from the 18 July runs until 6 August. Two of them were
+inverted, not merely imprecise: "coverage over-proposes, 94–99.9% of edges die" became 74–90%
+of B0→B1 candidates *passing*, and "deep block pairs carry no signal" became 9–41%.
+
+**How it surfaced.** It did not. We went looking, and only because a *different* question was
+being asked: whether the 24 July superparent-gate change had invalidated the 18 July numbers.
+The first attempt re-ran stages 02 and 02b against the same cache, found nothing moved, and
+nearly closed the question — which proved only that stage 02's thresholds are not what moves,
+since the input was byte-identical. Rebuilding the cache was what exposed it. Nothing in six
+metrics, five layers or any dashboard had flagged anything.
+
+**Root cause.** BOS is an attention sink: effectively every feature fires on it. With
+`PREPEND_BOS = True` and `N_DOCS = 400`, every parent/child pair in the dictionary — including
+pairs that never co-occur anywhere else — accumulated 400 joint firings. `MIN_JOINT` is 30.
+
+The guard exists precisely to kill pairs whose co-firing is coincidence, and one token handed
+every pair 13× the co-firing it needed to clear it. So the guard passed everything, and each
+metric downstream was grading a candidate set that should never have existed.
+
+**Blast radius.** Every gemma number published before 6 August, on all five layers. Concretely
+at L6: B2→B3 candidates 4,704,312 → 762; B0→B1 reconstruction pass 6.3% → 85.9%;
+frequency-driven share 60.8% → 1.0%; survival 0.441 → 1.031. Token counts 48,971 → 48,571 on
+every layer — exactly 400, one BOS per document, which is the cheapest way to tell a v1
+artifact from a v2 one at a glance.
+
+Provably unaffected: **one** claim, "it is not a tree" (89–100% of children keep ≥2 parents).
+It survives because it is the only one that does not depend on the candidate set — a ratio
+over children that already have a parent. Also unaffected: the PCFG work, which never used
+these caches, and both toy calibration tiers, which build their own data.
+
+That single survivor is the finding underneath the finding. Five of the six metrics read the
+same co-firing matrix. The battery was designed as independent detectors that would fail
+independently; they share an input, so one contaminated token position defeated them together.
+Agreement among them is much weaker evidence than the design implies.
+
+**Fix.** BOS exclusion was already in the code (`schema_version: 2`, `bos_excluded: True`) —
+the corrupted caches predated it. All five layers regenerated from stage 01 through
+`run_pipeline.py` on GPU 3, v2 caches uploaded to the Hub under `v2/layer_NN/exp0_stats.pt`,
+v1 results archived under `metrics/outputs_archive/`, and the site updated. L24 was rerun from
+two different commits to check the result does not depend on which merge the code sits at —
+identical. `cf96fd4` withdrew the two hand-built pages whose entire content was the inverted
+fractions.
+
+**Prevention.** Not yet in place, and saying otherwise would be the same mistake in a
+different form. `contracts/validate_stats.py` *would* reject a v1 cache — it requires
+`schema_version == 2` — but **nothing in the pipeline calls it**: neither `run_metrics.py` nor
+`run_pipeline.py` imports it. The guard exists and is not wired in. It is also across a repo
+boundary: the validator lives in the umbrella repo, the pipeline in the `metrics` submodule,
+so wiring it is a real change and not a one-line import.
+
+Second gap, from the same episode: three separate times a committed artifact under
+`outputs/` was read as fresh output, once producing a spurious "L3 was never contaminated"
+reading that survived until a token count was checked. An output directory under version
+control makes a stale file indistinguishable from a fresh one by inspection.
+
+**Closes when.** (1) Stage 01 refuses to hand a cache to stage 02 unless it validates, so a
+v1 file cannot be graded at all; and (2) the Tier-3 semantic reading of the v2 survivors has
+been done. Until (2), the site shows regenerated numbers no human has read — the claims were
+withdrawn, and nothing has yet been put in their place.
+
+---
+
+## 2026-08-06 — The validator inferred a dictionary size that does not exist   `fixed`
 
 **Symptom.** `validate_stats.py` rejected a correct stats file:
 `fire_count: expected shape (10,), got (12,)`.
@@ -69,7 +162,7 @@ against something correct is untested in the direction that matters.
 
 ---
 
-## 2026-08-06 — Default pad id was the document delimiter
+## 2026-08-06 — Default pad id was the document delimiter   `fixed`
 
 **Symptom.** None, by design of the guard. Without it: every document boundary would
 have been dropped from the statistics and a complete, plausible report produced from
@@ -98,7 +191,7 @@ works.
 
 ---
 
-## 2026-08-05 — Stage 02 accepted a non-gemma stats file and returned a full report
+## 2026-08-05 — Stage 02 accepted a non-gemma stats file and returned a full report   `fixed`
 
 **Symptom.** None. `run_metrics.py` would take a stats file from any source and produce
 a complete `metrics_report.json` with plausible numbers.
@@ -127,7 +220,7 @@ accumulation on a 28-feature dictionary so a reintroduced global fails loudly.
 
 ---
 
-## 2026-08-05 — Contract validator rejected known-good data
+## 2026-08-05 — Contract validator rejected known-good data   `fixed`
 
 **Symptom.** `validate_stats.py --self-test` failed on the synthetic toy:
 `g_parent_sum: contains negative values`.
@@ -150,7 +243,7 @@ correct data is worse than none, because it trains you to ignore it.
 
 ---
 
-## 2026-08-05 — Stub test dropped a quarter of its own tokens
+## 2026-08-05 — Stub test dropped a quarter of its own tokens   `fixed`
 
 **Symptom.** `tests/test_collect_generic.py` reported 124 tokens where 180 were
 expected.
@@ -173,7 +266,7 @@ assertion is what turned a silent 31% data loss into a one-line failure.
 
 ---
 
-## 2026-08-05 — `\b` word boundaries silently no-op in macOS sed
+## 2026-08-05 — `\b` word boundaries silently no-op in macOS sed   `fixed`
 
 **Symptom.** A normalisation step meant to prove the refactored accumulation loop was
 byte-identical reported spurious differences.

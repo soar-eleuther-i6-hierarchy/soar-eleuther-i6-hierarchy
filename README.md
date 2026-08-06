@@ -147,7 +147,7 @@ artifact volume. See [`docker/README.md`](docker/README.md) for what those image
 
 | Piece | State |
 | --- | --- |
-| Exp 0 — metric battery | complete; 10 metrics, 3 validation tiers + a control, 5 gemma layers, [published](https://soar-eleuther-i6-hierarchy.github.io/metrics/) |
+| Exp 0 — metric battery | code complete; 10 metrics, 3 validation tiers + a control, 5 gemma layers, [published](https://soar-eleuther-i6-hierarchy.github.io/metrics/). **The findings are not** — see below |
 | Exp 2 — PCFG pipeline | corpora + base-model training complete; 58 base models across four sweeps |
 | Exp 2 — SAE side | Matryoshka complete and wired to the PCFG run layout |
 | Metrics handoff | **done** — [`adapters/from_pcfg.py`](adapters/from_pcfg.py); both metric stages now take the block structure from the stats file. Verified end to end on a real run: a 1792-latent SAE in 8 blocks over 1.02M tokens, metric code untouched |
@@ -158,6 +158,24 @@ The remaining blocker is data, not code. The cheapest thing that turns one point
 result is the *other extreme* rather than the full sweep — an SAE at `zipf_exponent 0.0`,
 whose base model is already trained and quality-checked.
 
+### Exp 0 — what is still open after the BOS correction
+
+The gemma results were regenerated on 6 August after BOS was found to be satisfying the
+joint-support guard for every pair in the dictionary. Three of the four claims did not
+survive; the full account is in [`research-log/ERROR_LOG.md`](research-log/ERROR_LOG.md),
+entry `open`. What that leaves:
+
+| Open item | State |
+| --- | --- |
+| **Tier-3 semantic reading** | not redone. The site shows regenerated numbers **no human has read**. This is the one that gates any new claim: the old ones are withdrawn and nothing has replaced them |
+| **Stage 03** (`run_token_metrics`) | run on **L6 only**. `run_metrics` labels its own sibling-redundancy figure `global_jaccard_confounded` and defers the verdict to stage 03 — so the published sibling number is the confounded one on four layers of five |
+| **In-block metric** (`in_block_edges`) | never run, on any layer |
+| **The validator is not wired in** | `contracts/validate_stats.py` rejects a v1 cache, but nothing in the pipeline calls it. It sits in this repo, the pipeline sits in the submodule |
+| **Two withdrawn pages** | `kill_rates.html` and `cross_depth_comparison.html` were hand-built with no generator and reported the fractions that inverted. Archived under `metrics/outputs_archive/` with a banner, not repaired. A cross-depth view should return only behind a generator |
+| **Pages build is at its ceiling** | the last successful build took 10.6 min against a 10-minute limit, and the next one timed out before succeeding on retry. 10 MB of the 17 MB served is `feature_labels.json`, which no published page fetches — it is a build input, not a site asset. A `_config.yml` excluding it from the *site* (not from git) is the fix |
+
+Nothing here blocks Exp 2. All of it blocks writing Exp 0 up.
+
 Engineering still open, none of it blocking an experiment: `contracts/validate_run_dir.py`
 for the artifact layout; `adapters/from_toy.py` and `from_tinystories.py`; a `pipeline/`
 that runs the chain end to end in one command; dashboards for non-gemma sources
@@ -167,4 +185,4 @@ that runs the chain end to end in one command; dashboards for non-gemma sources
 
 - **Project spec** — `SOAR I-6 Project Plan.md` (research question, Exp 0–5, timeline)
 - **Paper workspace** — `paper-writing-collaboration/` (ICLR 2026 template, tagged references)
-- **Exp 0 paper outline** — `metrics/`'s section outline, with claims R1–R4 and the open blockers
+- **Exp 0 paper outline** — `metrics/`'s section outline, with the four claims and the open blockers
