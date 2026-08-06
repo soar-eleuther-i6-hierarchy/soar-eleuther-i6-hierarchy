@@ -19,12 +19,15 @@ soar-eleuther-i6-hierarchy/
 │
 ├── contracts/          the cached-statistics contract + its validator
 ├── adapters/           SAE source → cached statistics   (the integration layer)
+├── pipeline/           scripts that turn graded runs into a table
+├── research-log/       what we ran, what we learned, what broke
 ├── docker/             one image per sub-repo
 └── compose.yaml        the three over one shared artifact volume
 ```
 
 `contracts/` and `adapters/` live here rather than in a sub-repo because both are *about the
-relationship between* the repos — no single one of them can own either.
+relationship between* the repos — no single one of them can own either. `research-log/` is
+here for the same reason: a result produced by all three belongs to none of them.
 
 ## Clone
 
