@@ -62,6 +62,58 @@ a test, a contract. "Be careful next time" is not prevention.
 
 ---
 
+## 2026-08-07 — Fifteen published pages rendered their nav bar and nothing else   `fixed`
+
+**Symptom.** Every `metrics_dashboard`, `superparent_sankey` and `qualitative_dashboard` on
+all five gemma layers — the site's main results — opened to a working nav bar above an empty
+white page. Since the layer directories were regrouped on 5 August, so roughly two days,
+and on the published site rather than locally.
+
+**How it surfaced.** Not by any check. A reader opened layer 3's qualitative page, saw
+nothing, and asked whether the reason was that `qualitative_check.py` had never been run. It
+had: the JSON holds 20 rows per layer and the HTML carries a 15.7 KB plotly table payload.
+Both halves of the page were present and correct.
+
+**Root cause.** The `<script src>` for the shared plotly bundle. `write_page` computes it
+per page — `outputs/gemma2_2b/layer_NN/` needs `../../assets/plotly.min.js` — but the value
+is baked into the file at generation time. Grouping results under `outputs/<source>/` in
+`0139852` added a directory level, so every page not regenerated afterwards kept
+`../assets/` and pointed one directory short. The bundle 404s, plotly never loads, and the
+`<div>` it would have filled stays empty.
+
+Nothing looked broken because the nav bar is plain HTML and CSS. It rendered, so each page
+announced its layer, its source and its six sibling pages while showing no result at all —
+the most confident possible presentation of nothing.
+
+`d27a83f` fixed 295 links broken by the same move. It missed this one because a
+`<script src>` is not a link in the sense that pass was walking, and because the pages it
+did fix looked fixed.
+
+**Blast radius.** 15 pages under `outputs/` and 15 more under `outputs_archive/`, which were
+blank on the same terms — the archived pages carry a banner saying they are withdrawn, not
+that they are empty. Nothing computed is affected: every number, every JSON report and every
+figure is untouched, and the payloads were in the files the whole time. What was lost is two
+days of anyone being able to read them. Provably unaffected: the in-block pages published
+today, both PCFG layers and both calibration pages, all generated after the move and
+verified to resolve.
+
+**Fix.** `refresh_nav` now rewrites the plotly `src` alongside the nav block. It is the same
+class of thing — a path derivable from the file's own location — so it needs no
+regeneration, which matters because rebuilding these pages needs the ~810 MB cache per
+layer. 30 pages repaired; all 28 live pages plus the archive now resolve their bundle.
+
+**Prevention.** Partial, and saying otherwise would be the mistake in the entry above. The
+repair is in place and `--check` reports drift, but nothing yet *fails* when a page's asset
+link stops resolving. The guard that would have caught this is a link check over the built
+site — every `src` and `href` in every generated page resolving to a file that exists — and
+it does not exist yet. Until it does, this class is found the way this instance was: by
+someone opening the page.
+
+**Closes when.** A check exists that walks the generated pages, resolves every `src`/`href`,
+and exits non-zero on a target that is not there.
+
+---
+
 ## 2026-08-07 — The strict test had no calibration, and a page said it did   `fixed`
 
 **Symptom.** None, and none was possible. `validation/calibrate_on_synthetic_toy.py` closed its
