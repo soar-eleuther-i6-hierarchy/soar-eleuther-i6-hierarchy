@@ -62,6 +62,57 @@ a test, a contract. "Be careful next time" is not prevention.
 
 ---
 
+## 2026-08-07 — The metrics' maths was "checked" by reading it, twice   `fixed`
+
+**Symptom.** None, and there was nothing to see: no formula was wrong. The defect is that
+nothing could have told us if one had been. "Check the math of the metrics" was reported
+complete on 7 August at 18:20 and again at 22:40, both times on the strength of reading each
+module against its docstring.
+
+**How it surfaced.** Not by a failure. On being asked to *confirm* the task rather than
+report it, the honest answer was that reading is not a check, and the reason it is not was
+already visible in the repo's own design.
+
+**Root cause.** Tier 1 grades **behaviour**, and the production function is what produces the
+numbers it grades. So a formula that is consistently wrong still separates the two classes and
+still scores 14/14. Divide coverage by the parent instead of the child everywhere, and genuine
+edges still out-score pathological ones by the same ratio; nothing in the scorecard moves.
+
+This is the same shape as the two entries above it. A calibration that names a tier rather
+than a file is not checkable by reading either tier; a claim verified by reading is not
+checkable at all. In each case the artefact looked verified because something adjacent to it
+was.
+
+The one that would have hurt most is metric 2a. `reconstruction.py` uses a closed form for the
+error increase from ablating a feature, `g = 2a⟨d, err⟩ + a²‖d‖²`. Every number it reports is
+a *ratio* of these, so a dropped factor of two rescales every gain by the same constant,
+changes no verdict, appears in no scorecard row, and is invisible in every published figure.
+
+**Blast radius.** None found. Twelve definitions were recomputed independently and all twelve
+match the code, so no published number is affected. What was wrong was the confidence, not the
+arithmetic — and the entry exists because that distinction is the whole subject of this log.
+
+**Fix.** [`metrics/tests/test_metric_math.py`](../metrics/tests/test_metric_math.py)
+recomputes each metric from the definition in its own docstring — by explicit loops over
+tokens where possible, never by reusing the implementation — and asserts equality. The
+ablation gain is checked against `‖err + a·d‖² − ‖err‖²` computed literally, one token and one
+feature at a time.
+
+**Prevention.** The test is the prevention, and it was verified in the failing direction by
+injecting four real errors, none of which Tier 1 would have caught:
+
+| injected error | caught |
+| --- | :---: |
+| drop the factor of 2 in the ablation gain | ✅ |
+| divide coverage by the parent instead of the child | ✅ |
+| forget to normalise the independence null by `N` | ✅ |
+| let the in-block graph become cyclic | ✅ |
+
+It also asserts that the toy world carries the six signatures it documents, so a structure
+quietly losing its intended shape fails here rather than in a scorecard row that still passes.
+
+---
+
 ## 2026-08-07 — Fifteen published pages rendered their nav bar and nothing else   `fixed`
 
 **Symptom.** Every `metrics_dashboard`, `superparent_sankey` and `qualitative_dashboard` on
@@ -113,6 +164,46 @@ page.
 It earned its place the day it was written. Renaming the synthetic tier's files touched 34
 files of references, and the coverage guard beside it caught a path the bulk rewrite had
 missed — the class of thing that used to be found by someone opening a page.
+
+---
+
+## 2026-08-07 — Nine pages were dead ends, and both guards were blind to them by construction   `fixed`
+
+**Symptom.** Nine generated pages carried no nav bar: the seven `in_block_edges.md` reports,
+the paper-figures index and the archive index. Reaching one by link left you on it — no route
+to the layer, the source or the site root.
+
+**How it surfaced.** While auditing the site after the blank-pages repair, by counting pages
+that contain the nav marker rather than by following links.
+
+**Root cause.** `in_block_edges.to_md` never injected the bar, unlike `run_metrics.to_markdown`
+— a consequence of that script having been written while it sat outside the pipeline, the same
+origin as its gemma-only constants.
+
+**The part worth keeping is why nothing caught it.** Two guards cover this area and each is
+blind to a missing nav for a structural reason:
+
+- `test_site_links.py` resolves every `href` and `src` and finds nothing wrong, because a page
+  with no nav has no links to resolve. Its check is *are the links right*, and the failure is
+  *there are no links*.
+- `refresh_nav` **replaces** a nav block and needs one to match. It cannot add a missing bar,
+  so it walked past all nine on every run and reported success.
+
+A defect that sits exactly in the gap between two guards is not caught by adding a third of
+the same kind. This is the same lesson as the BOS entry — six metrics failed together because
+they shared an input — one level up: the guards were assumed to compose, and they do not.
+
+**Blast radius.** Navigation only. No number, report or figure is affected; the pages
+themselves were correct and complete.
+
+**Fix.** `in_block_edges.to_md` and `make_report_figures.write_readme` inject the bar the way
+every other generator does. The archive index is hand-written, so it gets the block once and
+`refresh_nav` owns it from there.
+
+**Prevention.** The count itself: zero pages under `outputs/` and `outputs_archive/` without a
+nav marker, checked after every regeneration. Stated as a fact to re-check rather than a test,
+which is the honest status — a page with no bar is not currently a build failure, only a
+number that would move.
 
 ---
 
@@ -314,10 +405,23 @@ Second gap, from the same episode: three separate times a committed artifact und
 reading that survived until a token count was checked. An output directory under version
 control makes a stale file indistinguishable from a fresh one by inspection.
 
-**Closes when.** (1) Stage 01 refuses to hand a cache to stage 02 unless it validates, so a
-v1 file cannot be graded at all; and (2) the Tier-3 semantic reading of the v2 survivors has
-been done. Until (2), the site shows regenerated numbers no human has read — the claims were
-withdrawn, and nothing has yet been put in their place.
+**Closes when.** Two conditions; **one is now met.**
+
+- ~~(2) the Tier-3 semantic reading of the v2 survivors has been done~~ — **done 7 Aug.** All
+  40 survivors at B0→B1, eight per layer across the five layers, read against Neuronpedia
+  labels. About half are genuine refinement; the commonest failure is a semantic parent with a
+  function-word or formatting child, which is topical co-occurrence and which nothing in the
+  battery detects. See the 21:30 entry in `EXPERIMENT_LOG.md`. The site no longer shows
+  numbers no human has read.
+- **(1) Stage 01 refuses to hand a cache to stage 02 unless it validates**, so a v1 file cannot
+  be graded at all. **Still open**, and unchanged: `contracts/validate_stats.py` rejects a v1
+  cache — verified today against all three committed stats files plus its self-test — but no
+  stage imports it. It is also across a repo boundary, the validator here and the pipeline in
+  the submodule, so wiring it is a real change.
+
+Leaving this entry `open` on (1) alone is the honest state. It was `open` on both for a day
+after (2) was satisfied, which overstated what was blocking and understated what had been
+done — the kind of drift the status field exists to prevent.
 
 ---
 
