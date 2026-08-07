@@ -96,6 +96,71 @@ two layers of a four-layer model.
 
 ---
 
+## 2026-08-07 12:37 +03 — The zipf axis is retired: the hypothesis is about global frequency
+
+**Question.** The 6 Aug 08:40 entry closes by deferring one thing to the mentors: is
+bottleneck hijacking about **global** token frequency or about frequency **within the
+context window**? Everything about Exp 2's remaining work hangs on it, and it is a question
+about what the hypothesis means, so no measurement of ours could settle it.
+
+**How it can be answered.** Only by the people who wrote the hypothesis. What our
+measurements could do — and had already done — is make the consequences of each answer
+explicit beforehand, so the ruling lands on a decision rather than on a discussion.
+
+**What we ran.** Nothing. The question was put to the mentors with the two axes' measured
+token distributions attached. A mentor answered on 7 Aug 12:37:
+
+> Global, i.e. the whole training data corpus level.
+
+**Result.** The ruling selects among facts already in this log rather than producing new
+ones:
+
+| | measured | source |
+| --- | --- | --- |
+| zipf axis, top-10 share **within a document** | 59.2% | 6 Aug 08:40 |
+| zipf axis, top-10 share **across the corpus** | 1.3% (uniform = 1.0%) | 6 Aug 08:40 |
+| formatting axis, frequency-driven edges | 0.0% → 10.6% across density | 6 Aug 08:40 |
+| formatting axis, mean survival | 0.994 → 0.886 | 6 Aug 08:40 |
+| gemma after BOS correction, frequency-driven edges | 0.9–2.2%, all five layers | 6 Aug 19:20 |
+| L24 feature 14, edges that are frequency-driven | 0 of 84 | 6 Aug 17:05 |
+
+**Interpretation.** `zipf_exponent` weights terminal *ranks* and the generator re-permutes
+which id holds which rank per document, so it moves the within-document distribution and
+leaves the corpus marginal flat. Under the global reading it therefore does not vary the
+quantity the hypothesis names, and no SAE trained along it can exercise the mechanism. The
+axis is not blocked; it is inapplicable. This retires the project's standing blocker without
+resolving it — a different outcome from finishing it, and the write-up should say so.
+
+Two things follow that are not about zipf. `local_frequency_buckets` / `--local-freq`
+(merged, never run) measures exactly the frequency the ruling excludes, so it is out of scope
+for the headline claim rather than a pending task. And the existing `zipf 1.5` run keeps a
+role, a better one than it had: as a **control** showing that varying within-document
+concentration moves nothing, which is what makes the formatting result specific to global
+frequency rather than to distributional change in general.
+
+The uncomfortable part is that the ruling makes the hypothesis testable on gemma and the test
+is largely negative. After the BOS correction the global-frequency metric exonerates gemma at
+every layer, and L24's superparent — the clearest instance of the pathology we have — is a
+base-rate artifact with zero frequency-driven edges. So the mechanism is real where globally
+frequent tokens are manufactured (the formatting axis) and absent where the claim that
+matters lives. That is a result, not a gap, but it is a different paper from the one the
+plan anticipated: bottleneck hijacking is demonstrable, and it is not what produces gemma's
+superparents.
+
+**Answer.** Global. The zipf axis is retired for this hypothesis, formatting density is the
+mechanism axis and is complete, and `--local-freq` is out of scope. What replaces the zipf
+sweep as Exp 2's open work is not yet decided — the formatting axis has three seeds at four
+densities and no remaining degrees of freedom, so the next question has to come from
+somewhere other than the axis list.
+
+**Caveats.** This entry records a ruling, not a measurement; the numbers in it are all
+carried from earlier entries and none were re-run. The reading that the zipf generator
+cannot vary global frequency rests on one measurement of one corpus at `zipf 1.5` — whether
+the other five exponents behave the same way was never checked, and a high enough exponent
+might concentrate the corpus marginal even under re-permutation.
+
+---
+
 ## 2026-08-07 11:45 +03 — The full five-stage funnel on a PCFG SAE: one pair carries every candidate edge, and the strict test leaves none of it
 
 **Question.** Run against a PCFG SAE, does the battery produce the same *shape* of

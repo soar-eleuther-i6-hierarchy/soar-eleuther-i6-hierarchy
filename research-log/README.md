@@ -10,7 +10,8 @@ what we learned, and what broke.
 
 Both are append-only: an entry is never edited after the fact. When a reading turns out
 wrong, a new entry supersedes it and links back — that is what makes the log evidence
-rather than a summary.
+rather than a summary. The one exception is a personal name: these repositories are public, and
+removing a name is a privacy correction, not a revision of the record. Write the role instead.
 
 Project hygiene — stale numbers still circulating, dead links, what needs regenerating —
 goes in the umbrella [`README.md`](../README.md) status table. It is not a result, so it
