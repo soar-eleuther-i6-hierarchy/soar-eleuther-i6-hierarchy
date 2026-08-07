@@ -4,6 +4,99 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-08-07 11:45 +03 — The full five-stage funnel on a PCFG SAE: one pair carries every candidate edge, and the strict test leaves none of it
+
+**Question.** Run against a PCFG SAE, does the battery produce the same *shape* of
+funnel as a gemma layer — most candidates dying, and dying at the strict test — or does
+it differ, and if so at which stage?
+
+Until today the question could not be asked. `run_token_metrics` (stage 03, S_res) sliced
+gemma's block ranges and loaded gemma's decoder whatever cache it was given, so the strict
+test was unavailable for any other source; a PCFG run could only be graded on candidate
+coverage, reconstruction and the frequency control. Three of five stages is not a funnel.
+
+**How it can be answered.** Grade a PCFG run through all four stages and put its per-pair
+funnel beside gemma L6 — the only layer that has stage 03 — as *shares*, not counts.
+Counts are not comparable across sources: 1792 latents in 8 blocks against 32768 in 5,
+different corpora, different alive-feature fractions. Shares are what the project's claim
+is stated in ("94–99.9% of coverage edges do not survive"), so shares are what a second
+source can agree or disagree with.
+
+**What we ran.** `zipf_sweep/13df3dd54c16-s1`, layer 1, from `/mnt/ssd-1/april/pcfg-experiments`
+via the new `pipeline/fetch_pcfg_runs.sh` — the node has no `rsync`, and the corpus came
+across as a 32 MB prefix (43,698 documents) of a 382 MB file, since grading reads from the
+start of the stream and stops.
+
+```bash
+pipeline/fetch_pcfg_runs.sh ruqiya@216.153.51.202 zipf
+python3 adapters/from_pcfg.py --run-dir data/pcfg-run --layer 1 --docs 3400 \
+        --out metrics/outputs/pcfg/exp0_stats.pt
+cd metrics && EXP0_RUN=pcfg python3 run_metrics.py --stats outputs/pcfg/exp0_stats.pt \
+        --out-dir outputs/pcfg
+EXP0_RUN=pcfg python3 run_token_metrics.py
+EXP0_RUN=pcfg python3 -m reporting.visualize
+```
+
+Base model 4L `d_model=448`, vocabulary 1004; SAE 1792 latents in 8 blocks, `batch_topk`
+with an EMA threshold of 0.663. 3400 windows × 300 tokens = **1,016,600 tokens**; the
+window is 300 because that is the shortest document in the fetched prefix. 941/1792
+features alive (52.5%). Pages at `metrics/outputs/pcfg/`.
+
+**Result.** Edges surviving each stage. gemma L6 (`outputs/layer_06/`, regenerated 6 Aug,
+BOS-excluded) for contrast:
+
+| source · pair | candidate | improves recon | freq-driven | PMI > 0 | pass S_res |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **PCFG** B0→B1 | 327 | 327 (100%) | 0 | 327 | **0** |
+| PCFG B1→B2 | 1 | 1 | 0 | 1 | 1 |
+| PCFG B2→B3 | 2 | 2 | 0 | 2 | 1 |
+| PCFG B3→B4 | 0 | 0 | 0 | 0 | 0 |
+| PCFG B4→B5 | 1 | 1 | 0 | 1 | 1 |
+| PCFG B5→B6 | 0 | 0 | 0 | 0 | 0 |
+| PCFG B6→B7 | 1 | 1 | 0 | 1 | 0 |
+| **gemma L6** B0→B1 | 2428 | 2086 (85.9%) | 25 | 1700 | **10** |
+| gemma L6 B1→B2 | 280 | 100 (35.7%) | 77 | 278 | 53 |
+| gemma L6 B2→B3 | 762 | 239 (31.4%) | 277 | 739 | 216 |
+
+332 candidate edges over seven pairs on PCFG, 3470 over three on gemma L6. Mean frequency
+survival on PCFG B0→B1 is 1.020 over 327 testable edges; its top parent (feature 153) fires
+on 56.8% of tokens and holds 128 children, 39.1% of the pair's edges.
+
+**Interpretation.** Three things differ, and they are not the same kind of difference.
+
+*The candidate set is concentrated in one pair.* Six of seven PCFG pairs produce 0–2
+candidate edges, so every ratio below B0→B1 rests on one or two edges and means nothing.
+The comparison is really B0→B1 against B0→B1.
+
+*The frequency control is idle.* Zero frequency-driven edges anywhere on PCFG against
+25/77/277 on gemma. This is not new and not a property of the SAE: the 6 Aug entry
+established that `zipf_exponent` re-permutes ranks per document, leaving the corpus-wide
+marginal near uniform (top-10 tokens 59.2% within a document, 1.3% corpus-wide), and the
+control buckets by *global* counts. A metric with nothing to detect reports nothing to
+detect. It is the reason the formatting axis exists.
+
+*The strict test kills B0→B1 outright* — 0/327, against gemma's 10/1700 (0.6%). Both are
+near-total, which is the direction the claim predicts, but "0" and "0.6%" are not
+distinguishable at these counts, and a zero has an alternative explanation a small
+percentage does not: probe power. S_res trains a self-labeled probe per child, and the
+circularity caveat in `metrics/sres.py` applies to both sides equally, but 448 dimensions
+over 1M tokens is a different regime from gemma's 2304.
+
+Two caveats on the numbers themselves. **They do not supersede the 6 Aug grading of this
+same run** (21 edges, `exp0_stats_full.pt`): that one used the full corpus with 511-token
+windows, this one a prefix with 300-token windows, and window length moves every firing
+count and every co-firing count. Neither is more correct; they are different measurements.
+And this is one seed at one `zipf_exponent`, which is the project's standing blocker — one
+point is not a curve.
+
+**Answer.** The battery now runs end to end on a source that is not gemma, and on this run
+the shape agrees where it can be compared: candidates die, and they die at the strict test.
+It agrees on one block pair out of seven, with the frequency control contributing nothing on
+this axis by construction — so this is a working second source, not yet a second data point
+for the claim.
+
+---
+
 ## 2026-08-06 19:20 +03 — The depth-degradation result was a BOS contamination artifact
 
 **Question.** The published depth numbers were produced on 18 July; the superparent gate

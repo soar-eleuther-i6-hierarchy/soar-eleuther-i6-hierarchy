@@ -62,6 +62,53 @@ a test, a contract. "Be careful next time" is not prevention.
 
 ---
 
+## 2026-08-07 — The reporting stages were still gemma-only after `collect()` stopped being   `fixed`
+
+**Symptom.** None yet, and that is the entry. `run_metrics.py` was taught to read the block
+structure from the stats file when the PCFG adapter landed; `run_token_metrics.py` (stage 03)
+and `reporting/visualize.py` (stage 04) were not, and kept slicing `config.BLOCK_RANGES` —
+gemma's 32768 latents in five blocks. Grading a PCFG file (1792 in eight) through them would
+have drawn dashboards and computed S_res over the wrong feature columns for pairs B0→B1
+through B3→B4, then raised an `IndexError` on the fifth pair, which does not exist in gemma's
+structure. The first four would have looked completely normal: right shapes, plausible
+numbers, a page that renders.
+
+Stage 03 had a second one. It called `sae_utils.load_sae()` unconditionally — the *released
+gemma decoder* — to turn each probe into per-feature correlations, whatever dictionary the
+token cache came from.
+
+**How it surfaced.** Not by running. Found while reading the reporting path to answer whether
+a PCFG run could be published as a page beside the gemma layers. Nobody had run stage 04 on a
+non-gemma cache, because until today no non-gemma cache had a token cache to run stage 03
+from, so there was nothing to publish and no reason to look.
+
+**Root cause.** `collect()` was split out of stage 01 and made source-agnostic; the claim
+"the same battery across every source" was then treated as established. But the battery is
+five stages, and only stages 01 and 02 were ever converted. The block structure travels in
+the stats file exactly so that no module has to hold it as a constant — and the two stages
+that still held it as a constant were the two nobody had exercised off-gemma.
+
+**Blast radius.** No published number is affected. Every gemma result was produced with
+`BLOCK_RANGES` describing gemma, which is what those slices are for. Verified rather than
+assumed: layer 6's `metrics_report.md` regenerates byte-identical from its committed
+`metrics_report.json` under the new code, and the toy-calibration page's nav bar is
+byte-identical to the published one. No PCFG page existed before today, so nothing wrong was
+ever shown. This is a near miss, logged because the next person to grade a PCFG run would have
+been the first to hit it — and would have hit it as four correct-looking pairs, not as a crash.
+
+**Fix.** `metrics` `89294a4`. Both stages now call `run_metrics.source_structure(stats)`;
+stage 03 takes the run's own decoder from `RUN_DIR/w_dec.pt` (written by the adapter,
+overridable with `--w-dec`) and asserts its feature count against the statistics, so a
+mismatch names itself instead of failing inside `sres_for_pair`.
+
+**Prevention.** `metrics/tests/test_dashboards_generic.py` — an 8-block stub through stages
+02, 03 and 04, asserting the pages describe the file they were built from. It was checked
+against the old behaviour: reverting the block-structure fix makes it fail. This is the same
+guard `test_collect_generic.py` provides for stage 01, which is precisely the guard that did
+not extend to the stages downstream of it.
+
+---
+
 ## 2026-08-06 — BOS satisfied the joint-support guard for every pair in the dictionary   `open`
 
 **Symptom.** None. Five layers of results, a published site, and four claims — three of which
