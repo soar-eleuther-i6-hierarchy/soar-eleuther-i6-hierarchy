@@ -123,8 +123,12 @@ and each rung licenses the one above it:
 | TinyStories (Exp 3) | none | cross-method comparison |
 | gemma-2-2b (Exp 4) | none | the claim that matters |
 
-The headline number — 94–99.9% of coverage edges do not survive — means something only because of
-the rungs beneath it.
+The headline is only worth what those rungs are worth. It has also changed: "94–99.9% of coverage
+edges do not survive" was measuring candidate sets BOS had inflated, and after regeneration the
+cheap filters accept most of what they see. What survives the correction is narrower — the
+probe-based refinement test rejects **99.4%** of the edges that reach it (10 of 1,700 at layer 6,
+the only layer it has run on), and multi-parenting is 89–100% across all five, so the graph is not
+a tree. See [`research-log/ERROR_LOG.md`](research-log/ERROR_LOG.md).
 
 ## The contract that joins them
 
@@ -205,7 +209,7 @@ entry `open`. What that leaves:
 
 | Open item | State |
 | --- | --- |
-| **Tier-3 semantic reading** | not redone. The site shows regenerated numbers **no human has read**. This is the one that gates any new claim: the old ones are withdrawn and nothing has replaced them |
+| **Tier-3 semantic reading** | **done, 7 Aug** — all 40 survivors (8 per layer × 5 layers, B0→B1) read against labels. About half are genuine refinement; the commonest failure is a semantic parent with a function-word or formatting child ("formal legal terminology" → the word "the"), which is topical co-occurrence — the one confound no metric here detects, and the one the synthetic toy now carries a negative control for. One reader, no protocol: a depth claim is **not** licensed by it |
 | **Stage 03** (`run_token_metrics`) | run on **L6 only**. `run_metrics` labels its own sibling-redundancy figure `global_jaccard_confounded` and defers the verdict to stage 03 — so the published sibling number is the confounded one on four layers of five |
 | ~~**In-block metric** (`in_block_edges`) never run~~ | **run on all seven graded runs** — five gemma layers and both PCFG layers, published as a sixth per-layer page. Same-level structure is a B0 phenomenon on both sources and is not explained by block size. Gemma carries **no S_res column** (the Hub has the stats cache, not the token cache), so those numbers are the entrance to the funnel: where the strict test did run, on PCFG layer 3, it took B0 from 888 edges to 7 |
 | **The validator is not wired in** | `contracts/validate_stats.py` rejects a v1 cache, but nothing in the pipeline calls it. It sits in this repo, the pipeline sits in the submodule |

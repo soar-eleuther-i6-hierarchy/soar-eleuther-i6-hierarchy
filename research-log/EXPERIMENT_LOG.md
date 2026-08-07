@@ -4,6 +4,86 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-08-07 21:30 +03 — The first Tier-3 reading since the BOS correction: the survivors' commonest failure is the one the battery cannot catch
+
+**Question.** The BOS correction withdrew three of four claims and nothing replaced them. The
+regenerated numbers have been on the site since 6 August with the log saying plainly that **no
+human has read them**. What do the surviving edges actually say?
+
+**How it can be answered.** Only by reading them. Tier 3 has no ground truth — it contrasts
+survivors against rejected edges and reads both endpoints against Neuronpedia's autointerp
+labels, which are themselves model-generated. That is why it is named `qualitative_check`
+and not `calibrate_*`.
+
+**What we ran.** First, a check that the artifact itself is not stale, since the whole point
+of the exercise is that the underlying data changed:
+
+```bash
+EXP0_LAYER=6 python3 -m validation.qualitative_check    # regenerate against the v2 cache
+```
+
+It reproduces the committed file: **the same eight survivors, 18 of 20 edges identical**, two
+edges moving inside the reject buckets. So `qualitative_check.json` was already built on
+BOS-excluded statistics on every layer — what was missing was the reading, not the run.
+
+Then the reading itself: all **40 survivors** (8 per layer × 5 layers, block pair B0→B1),
+each endpoint against its label. Label coverage is complete — 12–15 of 12–15 endpoints
+labelled per layer, so nothing was read as "no concept" because a fetch was short.
+
+**Result.** Read as parent→child refinement, by one reader:
+
+| layer | reads as genuine refinement | fails | examples |
+| --- | ---: | ---: | --- |
+| L3 | 5 | 3 | ✓ "first/third person pronouns" → "'it' or other third person pronouns" · ✗ "horizontal lines of dashes" → "legal and scientific article formatting" (child is *broader*) |
+| L6 | 6 | 2 | ✓ "the words in, to, from, as, on, with, for" → "the word 'at'" · ✗ "mathematical derivations and existing research" → "the word 'the' and pronouns" |
+| L12 | 3 | 5 | ✓ "names of individuals" → "proper names and specific identifiers" · ✗ "formal legal terminology" → "definitive articles and the word 'the'" |
+| L18 | 5 | 3 | ✓ "small common words such as prepositions" → "the preposition 'in'" · ✗ "code, formulas and citation-like text" → "blank lines" |
+| L24 | 3 | 5 | ✓ "code with names separated by underscores" → "capitalized acronyms separated by underscores" · ✗ "Danish words, especially movie titles" → "mixed English and Russian website coding" |
+
+**One failure mode accounts for most of it.** Eight of the forty survivors are a *semantic*
+parent with a *function-word or formatting* child:
+
+> "formal legal terminology" → the word **"the"** · "phrases indicating relationships" → the
+> word **"in"** · "mathematical derivations and research" → **"the" and pronouns** · "code,
+> formulas and citations" → **blank lines** · "parenthetical statements" → **LaTeX notation**
+
+Every one of these clears coverage, clears reconstruction, clears the frequency control and
+has PMI above chance. They are not frequency artifacts — the 6 Aug BOS correction took
+frequency-driven edges to about 1% at B0→B1, and these are not among them. They are two
+things that appear in the same documents.
+
+**Interpretation.** This is the toy's negative control, in production. The shared-topic pair
+added to `toy_world.py` earlier today exists to demonstrate that a conditionally independent
+pair under a common topic passes coverage, reconstruction, the frequency control *and* PMI —
+and here is that exact signature, as the single commonest way a surviving gemma edge is
+wrong. The control was written to prove a gap in the properties matrix; it turns out to
+predict the dominant failure of the real result.
+
+That sharpens what the open column costs. It was previously stated as a hypothetical
+(`enzyme → CT scan`). It is measurable: **20% of what survives the full battery at B0→B1 is
+this**, and closing it needs a topic null, not another threshold.
+
+**What this does not establish.** The genuine-refinement counts read 5 · 6 · 3 · 5 · 3 across
+depth. That looks like a trend and **must not be reported as one**. It is one reader's
+judgement over eight edges per layer, the layers are not monotonic, and a depth claim built
+on exactly this kind of eyeballing is what the BOS correction destroyed six weeks of. If the
+depth question is to be reopened it needs a written protocol and a second reader, and the
+counts here are a reason to try, not a result.
+
+**Answer.** The survivors are readable and about half of them are genuine refinement. The
+commonest way the other half is wrong is topical co-occurrence — the one confound in the
+properties matrix that no metric in the battery detects, and the one the synthetic toy now
+carries a negative control for.
+
+**Caveats.** One reader, no protocol, no second opinion; 40 edges out of the 20 top-ranked
+per layer that `qualitative_check` selects, so this is the head of the distribution and not a
+sample of it. Block pair B0→B1 only. The labels are autointerp output, so a "failure" may be
+a bad label rather than a bad edge — and the two L24 Danish-to-code survivors read more like
+a mislabelled parent than a real relation. `S_res` has run on layer 6 alone, so for four of
+these five layers the survivors have not faced the strict test at all.
+
+---
+
 ## 2026-08-07 20:05 +03 — The in-block metric runs at last, on seven runs: same-level structure is a B0 phenomenon, and reading it by count inverts it
 
 **Question.** `in_block_edges` had never been run on any layer of any source. It asks
