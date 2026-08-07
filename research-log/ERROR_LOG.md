@@ -102,15 +102,17 @@ class of thing — a path derivable from the file's own location — so it needs
 regeneration, which matters because rebuilding these pages needs the ~810 MB cache per
 layer. 30 pages repaired; all 28 live pages plus the archive now resolve their bundle.
 
-**Prevention.** Partial, and saying otherwise would be the mistake in the entry above. The
-repair is in place and `--check` reports drift, but nothing yet *fails* when a page's asset
-link stops resolving. The guard that would have caught this is a link check over the built
-site — every `src` and `href` in every generated page resolving to a file that exists — and
-it does not exist yet. Until it does, this class is found the way this instance was: by
-someone opening the page.
+**Prevention.** [`metrics/tests/test_site_links.py`](../metrics/tests/test_site_links.py)
+resolves every `href` and `src` across `outputs/` and `outputs_archive/` — 1,151 references
+over 93 pages — and exits non-zero on a target that is not there. It knows the two conventions
+the site relies on, so it does not cry wolf: Jekyll serves `foo.md` at `foo.html`, and a
+directory link resolves to its `README.md`. Checked in the failing direction on this exact
+breakage: rewriting one page's `../../assets` back to `../assets` makes it fail and name the
+page.
 
-**Closes when.** A check exists that walks the generated pages, resolves every `src`/`href`,
-and exits non-zero on a target that is not there.
+It earned its place the day it was written. Renaming the synthetic tier's files touched 34
+files of references, and the coverage guard beside it caught a path the bulk rewrite had
+missed — the class of thing that used to be found by someone opening a page.
 
 ---
 
