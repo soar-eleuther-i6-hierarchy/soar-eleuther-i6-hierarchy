@@ -133,7 +133,7 @@ not a new metric. [`contracts/stats_schema.md`](contracts/stats_schema.md) is th
 
 ```bash
 python3 contracts/validate_stats.py --self-test                     # spec vs. the synthetic toy
-python3 contracts/validate_stats.py metrics/outputs/layer_06/exp0_stats.pt
+python3 contracts/validate_stats.py metrics/outputs/gemma2_2b/layer_06/exp0_stats.pt
 ```
 
 The self-test asserts both directions: the spec accepts data known to be good, and rejects four
