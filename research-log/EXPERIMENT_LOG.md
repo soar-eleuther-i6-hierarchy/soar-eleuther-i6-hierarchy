@@ -4,6 +4,98 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-08-07 13:40 +03 — Layer 3 of the same PCFG run: the frequency control finds something, and four edges survive
+
+**Question.** Holding the corpus, the base model and every threshold fixed, does the layer
+the SAE was trained on change the verdict? Specifically: is the PCFG result from earlier
+today — no frequency-driven edges anywhere, nothing surviving S_res — a property of *this
+grammar*, or of *that layer*?
+
+It can come out either way, and the two answers point somewhere different. A grammar
+property would say the metric has nothing to detect on the zipf axis and the sweep needs
+the formatting axis instead. A layer property would say the first SAE we happened to
+publish was the uninformative one.
+
+**How it can be answered.** The same run has a second trained SAE, on layer 3. Grading it
+with identical knobs — same corpus prefix, same 3400 windows, same 1,016,600 tokens, same
+thresholds — leaves the layer as the only difference, so any change in the funnel is
+attributable to it and to nothing else.
+
+Note what this does *not* test. The PCFG base transformer has four layers (0–3), so "layer
+3" here is the last block of a 4-layer model, not the analogue of gemma's layer 24 in a
+26-layer one. Depth in this comparison is depth within a very shallow model.
+
+**What we ran.** `zipf_sweep/13df3dd54c16-s1`, the same run as the 11:45 entry, whose
+`sae/` holds `matryoshka_hook_resid_post_L1` and `_L3` and nothing else. The other six zipf
+runs hold no SAE at all.
+
+```bash
+ssh <node> "tar chf - -C <run>/sae matryoshka_hook_resid_post_L3" | tar xf - -C data/pcfg-run/sae
+EXP0_RUN=pcfg/layer_03 python3 adapters/from_pcfg.py --run-dir data/pcfg-run --layer 3 \
+        --docs 3400 --out metrics/outputs/pcfg/layer_03/exp0_stats.pt
+cd metrics && python3 run_metrics.py --stats outputs/pcfg/layer_03/exp0_stats.pt \
+        --out-dir outputs/pcfg/layer_03
+python3 run_token_metrics.py && python3 -m reporting.visualize
+```
+
+Pages at `metrics/outputs/pcfg/layer_03/`. Alive features 1069/1792 (59.7%), against
+941/1792 (52.5%) on layer 1.
+
+**Result.** B0→B1 carries the whole candidate set on both layers, as before; the pairs
+below it produce 0–3 edges each and are not read here.
+
+| B0→B1 | layer 1 | layer 3 |
+| --- | ---: | ---: |
+| candidate edges | 327 | **781** |
+| improve reconstruction | 327 (100%) | 743 (95.1%) |
+| frequency-driven | **0** | **9** (1.2%) |
+| mean frequency survival | 1.020 | **0.888** |
+| PMI > 0 | 327 | 772 |
+| pass S_res | **0** | **4** (0.5%) |
+| superparents | 2 | 6 |
+| max out-degree | 128 | 90 |
+| poly-parented children | 99.2% | 99.3% |
+
+The four surviving edges are `109→245`, `72→254`, `40→291`, `213→303` — four distinct
+parents and four distinct children, not one parent's fan-out.
+
+For scale, gemma L6 B0→B1 on the same battery: 2428 candidates, 25 frequency-driven (1.0%),
+10 of 1700 passing S_res (0.6%).
+
+**Interpretation.** The earlier reading was too strong, and this supersedes the part of the
+11:45 entry that generalised from one layer.
+
+*The frequency control is not structurally idle on this corpus.* It found 9 edges, and the
+mean survival moved from 1.020 — which is "no frequency dependence at all", the value that
+made it look like the metric had nothing to bite on — to 0.888. The 6 August finding stands
+as stated (zipf leaves the corpus-wide marginal near uniform, so the global-bucket control
+is weak here) but "weak" and "idle" are different claims, and only the first is supported.
+
+*The strict test is no longer a flat zero.* 0.5% against gemma L6's 0.6% is the same order,
+which is the first time a non-gemma source has produced a survival rate in that range rather
+than nothing. It is four edges: too few to read as a rate, enough to say the pipeline is not
+structurally incapable of producing survivors on this source.
+
+*What moved is not obviously "depth".* Layer 3 is the last of four, and the SAE there sits on
+a residual stream that has been through the whole model; layer 1 has seen almost none of it.
+More alive features (59.7% vs 52.5%) and more candidate edges follow from a denser dictionary
+as much as from a deeper one. A three-layer comparison would separate these; two points
+cannot.
+
+Caveats that would change the reading: one run, one seed, one zipf value; the corpus prefix
+fixes the window at 300 tokens, so these numbers are not comparable with the 6 August
+full-corpus grading of the same run; and S_res probes are self-labeled (the circularity
+caveat in `metrics/sres.py`), which applies equally to both layers but caps how much four
+survivors can mean.
+
+**Answer.** The layer changes the verdict. The "nothing survives, nothing is
+frequency-driven" reading from this morning was a fact about layer 1, not about the PCFG
+corpus — and the honest version of the earlier entry is that one layer of one run cannot
+tell you which. Whether what moved is depth, dictionary density, or both is not settled by
+two layers of a four-layer model.
+
+---
+
 ## 2026-08-07 11:45 +03 — The full five-stage funnel on a PCFG SAE: one pair carries every candidate edge, and the strict test leaves none of it
 
 **Question.** Run against a PCFG SAE, does the battery produce the same *shape* of

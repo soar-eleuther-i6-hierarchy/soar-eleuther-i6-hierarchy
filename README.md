@@ -188,7 +188,7 @@ artifact volume. See [`docker/README.md`](docker/README.md) for what those image
 | Exp 0 — metric battery | code complete; 10 metrics, 3 validation tiers + a control, 5 gemma layers, [published](https://soar-eleuther-i6-hierarchy.github.io/metrics/). **The findings are not** — see below |
 | Exp 2 — PCFG pipeline | corpora + base-model training complete; 58 base models across four sweeps |
 | Exp 2 — SAE side | Matryoshka complete and wired to the PCFG run layout |
-| Metrics handoff | **done, and now all four stages** — [`adapters/from_pcfg.py`](adapters/from_pcfg.py) feeds a token cache and the run's own decoder, so S_res runs on PCFG too. First published non-gemma run: [`metrics/outputs/pcfg/layer_01/`](metrics/outputs/pcfg/layer_01/README.md) — zipf 1.5, 1792 latents in 8 blocks, 1,016,600 tokens, metric code untouched |
+| Metrics handoff | **done, and now all four stages** — [`adapters/from_pcfg.py`](adapters/from_pcfg.py) feeds a token cache and the run's own decoder, so S_res runs on PCFG too. First published non-gemma source: [`metrics/outputs/pcfg/`](metrics/outputs/pcfg/README.md) — zipf 1.5, 1792 latents in 8 blocks, layers 1 and 3 at 1,016,600 tokens each, metric code untouched |
 | **Zipf axis** | **the blocker.** Base models exist at all six exponents; SAEs exist at `1.5` only. One point is not a curve |
 | Exp 3 — cross-method | blocked: T-SAE's contrastive loss and Priors-in-Time's post-hoc clustering are unfinished |
 
