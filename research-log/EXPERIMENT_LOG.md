@@ -4,6 +4,89 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-08-07 20:05 +03 — The in-block metric runs at last, on seven runs: same-level structure is a B0 phenomenon, and reading it by count inverts it
+
+**Question.** `in_block_edges` had never been run on any layer of any source. It asks
+something the cross-block graph cannot: whether two features in the *same* block stand in
+a containment or a duplicate relation. Does same-level structure exist, and where?
+
+**How it can be answered.** Grade every run we hold. The metric became runnable on a
+non-gemma source earlier today and became a pipeline stage at the same time; the gemma
+caches are on the Hub.
+
+**What we ran.** All five gemma layers plus both PCFG layers.
+
+```bash
+# v2 caches only -- v1 counted BOS. Verified: schema 2, bos_excluded, 48,571 tokens
+python3 -c "from huggingface_hub import hf_hub_download; ..."   # v2/layer_NN/exp0_stats.pt
+python3 in_block_edges.py --layer $L --skip-sres        # gemma, all five
+EXP0_RUN=pcfg/layer_0N python3 in_block_edges.py        # PCFG, with S_res
+```
+
+`--skip-sres` on gemma is forced: the Hub carries `exp0_stats.pt` and not `token_cache/`,
+which stage 01 writes only under `CACHE_RESIDUALS=1`. Gemma covers B0–B3; B4 has no cached
+within-block matrix by design (24576² ≈ 4.8 GB).
+
+**Result.** Directed edges / duplicate pairs / superparents:
+
+| | B0 (128) | B1 (384) | B2 (1536) | B3 (6144) |
+| --- | --- | --- | --- | --- |
+| L3 | 557 / 16 / **4** | 275 / 1 / 1 | 1707 / 7 / 1 | 1640 / 142 / 0 |
+| L6 | 712 / 11 / **5** | 15 / 1 / 0 | 88 / 0 / 0 | 566 / 19 / 0 |
+| L12 | 417 / 3 / **2** | 77 / 0 / 0 | 268 / 10 / 0 | 1844 / 258 / 0 |
+| L18 | 345 / 1 / **3** | 375 / 0 / 1 | 385 / 5 / 0 | 6091 / 833 / 0 |
+| L24 | 640 / 13 / **6** | 26 / 0 / 0 | 1155 / 6 / 1 | 969 / 54 / 0 |
+
+PCFG, eight equal blocks of 224:
+
+| | B0 | B1 | B2–B7 |
+| --- | --- | --- | --- |
+| layer 01 | 550 / 78 / **3** | 0 | 0–1 edges each |
+| layer 03 | 888 / 232 / **6**, S_res **7/884** | 4, S_res 0/4 | 0–1 edges each |
+
+**Interpretation.** The first reading of that table was wrong in a way worth recording,
+because it is the project's own logged mistake one level down.
+
+*Counts across these blocks are not comparable, and reading them as if they were inverts
+the result.* gemma's blocks are nested prefixes of 128, 384, 1536 and 6144 features, so the
+number of pairs available differs by a factor of 2300. L18's 833 duplicate pairs in B3 look
+like duplication concentrates in the deep blocks. As a rate they are **0.04 per thousand
+pairs against B0's 0.12** — three times *rarer*. The same correction applies to edges:
+
+| per 1000 pairs | B0 | B1 | B2 | B3 |
+| --- | ---: | ---: | ---: | ---: |
+| gemma L6, edges | **43.80** | 0.10 | 0.04 | 0.01 |
+| gemma L6, duplicates | **1.35** | 0.01 | 0.00 | 0.00 |
+
+*Same-level structure is a B0 phenomenon on both sources.* Four orders of magnitude between
+B0 and B3 on gemma; on PCFG it is starker still, 550 and 888 edges in B0 against 0–4 across
+all seven remaining blocks combined.
+
+*And it is not about block size.* The obvious explanation for gemma — B0 is only 128
+features, so one parent dominates its neighbours by scarcity — is refuted by PCFG, whose
+blocks are all 224 and where B0 still carries everything. What distinguishes B0 is that it
+is the outermost Matryoshka prefix: the only block trained to reconstruct on its own.
+
+*Duplicate density is far higher on PCFG*: 9.29 per thousand pairs at layer 03 against a
+gemma maximum of 1.35. On that run a quarter of B0's same-level structure is copies rather
+than refinement.
+
+**Answer.** Same-level structure exists, it is concentrated in B0 on both sources, and the
+concentration is not explained by block size. Superparents inside a block appear only in
+B0 — 4·5·2·3·6 across gemma layers, 3 and 6 on PCFG.
+
+**Caveats, and the first is large.** Gemma's numbers carry **no S_res column**, so they are
+the *entrance* to the funnel, not a verified structure. Where the strict test did run —
+PCFG layer 03, B0 — it took 888 edges to **7**. Reading the gemma table as established
+same-level hierarchy would repeat exactly the error the whole battery exists to prevent.
+Getting S_res on gemma needs `token_cache/`, which is built by stage 01 under
+`CACHE_RESIDUALS=1` and is not on the Hub — a compute-node run, not a download. L18's B3
+is an outlier at 6091 edges and 833 duplicates, several times any other layer, and we have
+no explanation. One corpus slice, 48,571 tokens on gemma and a 1,016,600-token prefix on
+PCFG.
+
+---
+
 ## 2026-08-07 18:20 +03 — Six of ten metrics were graded on a known tree, not ten; and the strict test's strictness is a property of dictionary size
 
 **Question.** Every number this project publishes rests on the claim that the battery is calibrated
