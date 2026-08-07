@@ -4,6 +4,78 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-08-07 22:40 +03 — The probe functions finally meet a learned feature, and catch a defect nobody injected
+
+**Question.** Tier 1 grades the probe functions on statistics we build by hand: the parent
+direction is one we chose, so "the rank rule finds it" is a claim about arithmetic. Does
+`S_res` accept a parent the SAE had to **learn**?
+
+Nowhere could answer it. gemma has no known tree; the synthetic toy has no training run. Only
+the trained toy has both, and Tier 2 imported five metric functions and none of the probes.
+
+**How it can be answered.** Score the probe functions inside Tier 2, against the tree it
+already knows. No new machinery was needed: `calibrate_on_trained_toy` already holds the toy's
+activation vector — which *is* its residual stream, the object the SAE decomposes and what
+stage 03 trains probes on — plus the learned activations and the trained decoder. No token
+cache, because nothing is streamed.
+
+**What we ran.**
+
+```bash
+python3 validation/calibrate_on_trained_toy.py     # now also scores the probe functions
+```
+
+**Result.** `S_res` accepts **5/5 testable true edges**, with the true parent at rank **0 or 1**
+and the child at the other. Four of the nine true edges are untestable: three because the child
+was never learned — the same ceiling recall 0.67 reports — and one because its child has too
+few negatives to train a probe against.
+
+Parent-conditioned redundancy, over each true parent's own firing set:
+
+| true parent | redundancy | tree says |
+| --- | ---: | --- |
+| 0 | 0.000 | `mutually_exclusive_children` |
+| 4 | **0.958** | `mutually_exclusive_children` |
+| 8 | 0.000 | `mutually_exclusive_children` |
+
+Parent 4 should look like the other two. It does not, and the reason is in the SAE:
+
+| | co-firings in 200,000 draws |
+| --- | ---: |
+| true features 5 and 7, in the grammar | **0** |
+| the latents that recovered them | **27,592** |
+
+The latent matched to feature 5 **never fires alone**. The trained SAE conflated two concepts
+the grammar keeps apart.
+
+**Interpretation.** Two things, and the second was not the plan.
+
+*The rank rule survives learning.* A parent the SAE had to find lands at rank 0 or 1 of the
+whole dictionary — not merely inside the top 5. That was previously supported by construction
+alone.
+
+*The metric caught a defect nobody injected.* This is the thing Tier 1 structurally cannot do:
+there, every pathology is one we put in, so a metric catching it shows only that the detector
+matches the injection. Here the conflation is the SAE's own, discovered rather than planted.
+And the battery's other half misses it entirely — edge recovery calls both of parent 4's edges
+recovered and precision stays **1.00**. So the sibling metric is adding a column coverage and
+reconstruction do not have, which is what the properties matrix asserts and what nothing had
+demonstrated on learned features.
+
+**Answer.** Yes. `S_res` accepts learned true parents, 5/5 where it is testable, and the
+sibling metric independently found a real conflation in the checkpoint.
+
+**Caveats, and the first is structural.** The dictionary is **20 latents**, so a top-5 rank rule
+passes an unrelated parent at `k/D` = **25%** by chance. This tier can therefore confirm that a
+learned true parent is *accepted*; it cannot show an unrelated one is *rejected*. gemma's 32768
+puts the same null at 0.015% — the dependence logged at 18:20 today, now constraining what its
+own validation tier can claim. One checkpoint, nine true edges, five of them testable; the
+probe target is self-labeled (`metrics/sres.py`), which the toy inherits and cannot resolve.
+The three new toy structures added earlier today — absorption, shared topic, in-block — live in
+the synthetic toy only and still have no trained-SAE counterpart.
+
+---
+
 ## 2026-08-07 21:30 +03 — The first Tier-3 reading since the BOS correction: the survivors' commonest failure is the one the battery cannot catch
 
 **Question.** The BOS correction withdrew three of four claims and nothing replaced them. The
