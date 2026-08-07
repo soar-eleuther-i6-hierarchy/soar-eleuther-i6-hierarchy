@@ -62,6 +62,99 @@ a test, a contract. "Be careful next time" is not prevention.
 
 ---
 
+## 2026-08-07 — The strict test had no calibration, and a page said it did   `fixed`
+
+**Symptom.** None, and none was possible. `validation/calibrate_on_synthetic_toy.py` closed its
+published scorecard with: *"The 4 per-token functions (`train_probe`, `sres_rank_check`,
+`negative_parent_composition`, `parent_conditioned_redundancy`) ... are calibrated in Tier 2."*
+Tier 2 imports `coverage_legs`, `keep_edges`, `edge_reconstruction_condition`,
+`frequency_controlled_coverage` and `frequency_buckets`, and nothing else. So **metric 2b — the
+probe-based `S_res`, the strict test that decides which edges survive on gemma — had never been run
+against a known answer**, and neither had the within-block metric. Believed since the file was
+written.
+
+**How it surfaced.** Not by running anything. Found while auditing which metrics the toys actually
+cover, prompted by a request to check the metrics' maths. The maths was fine; the coverage was not.
+No test, no dashboard and no metric could have flagged it, because an ungraded function does not
+behave differently from a graded one.
+
+**Root cause.** The claim named a **tier**, not a file. "Calibrated in Tier 2" is not checkable by
+reading Tier 2 — you have to read its import list and know which functions the sentence meant — so
+it inherited the credibility of the 9/9 scorecard printed above it without ever being tested.
+
+The mechanical reason it was never closed: the four functions read per-token residuals and firing
+masks, and `toy_world._reduce` computed exactly those (`feats`, `resid_err`, `W_dec`) and threw them
+away, returning only the reduced statistics. The toy could have graded them the whole time; nothing
+said it did not.
+
+**Blast radius.** No published number. The gemma and PCFG `S_res` figures were produced by the same
+code before and after, and the metric functions themselves were unchanged — what was missing was
+evidence that they do what they claim. Concretely, the sentence "10 of 1700 edges pass `S_res`" was
+never wrong; it was ungrounded. Tiers 1 and 2 both re-run to their documented values (9/9 across
+seeds 0–5; precision 1.00 / recall 0.67), so nothing they *did* cover is affected.
+
+**Fix.** `build_world` now also returns `resid`, `fired` and `W_dec`; the toy gained three
+structures with known answers (an absorbed child, a shared-topic pair, a within-block containment +
+duplicate pair) and the scorecard five rows. **14/14 across seeds 0–7, covering 21/21 metric
+functions** — was 13. Not yet committed at time of writing.
+
+Two things had to be corrected while closing it, and both are findings rather than plumbing:
+
+- The toy's own geometry was wrong for this test. At `d_model = 16`, 42 random unit directions
+  correlate up to 0.73, and three genuine edges failed the rank rule **with the child at rank 0 and
+  the true parent pushed to rank 6–8 by features it has nothing to do with**. That is a fact about
+  42 directions in 16 dimensions. `D_MODEL` is now 64, with the residual-error energy held fixed so
+  raising it does not shrink metric 2a's denominator.
+- The first version of the new row asserted the superparent's edges would be *rejected* by `S_res`.
+  Wrong: the rank rule is a geometry test, so an unrelated parent passes exactly when chance puts it
+  in the top *k* of *D*. Observed 2–4 of 20 against 2.4 expected. The row now asserts what the rule
+  claims — every true parent accepted, an unrelated one no better than chance.
+
+**Prevention.** [`metrics/tests/test_calibration_covers_metrics.py`](../metrics/tests/test_calibration_covers_metrics.py):
+parses the calibration and asserts every function in `metrics.__all__` (plus the four graded ones
+outside it) appears as a call there. Checked in both directions — it passes now, and injecting a
+name nothing calibrates makes it fail. A prose sentence about which tier covers what is not
+checkable; a call site is. Adding a metric without a scorecard row now fails a test instead of
+inheriting the previous sentence's credibility.
+
+---
+
+## 2026-08-07 — `in_block_edges.py` was still gemma-only, because it was not a stage   `fixed`
+
+**Symptom.** None yet. The script read `config.BLOCK_RANGES` — gemma's 32768 latents in five blocks
+— and loaded the released gemma decoder whatever cache it was handed. Pointing it at the published
+PCFG cache (1792 latents in eight blocks) would have graded four block pairs from the wrong feature
+columns and then raised `IndexError` on the fifth. The first four would have looked entirely normal.
+
+**How it surfaced.** Not by running it. Found while answering whether the in-block metric could run
+on PCFG at all.
+
+**Root cause.** The same two constants stages 03 and 04 stopped holding in `89294a4` (see the entry
+below). This file kept them for a reason worth recording: **it was not part of the pipeline.** It
+sat outside `run_pipeline.py` as a commented-out `ASIDE`, so the sweep that converted every stage to
+read its structure from the file being graded simply never reached it.
+
+That is also why it had never been run on any layer, gemma included. Nothing declared it, so nothing
+missed it.
+
+**Blast radius.** Nothing published. The script had produced no output on any source, which is the
+one circumstance in which this class of bug costs nothing.
+
+**Fix.** Structure now comes from `run_metrics.source_structure(stats)`; the decoder from the run's
+own `w_dec.pt` via the shared `load_w_dec`, with a feature-count assertion and a `--w-dec` override;
+and the blocks to analyse are read from what the file actually carries (`within_cofire`) rather than
+from `config.IN_BLOCK_BLOCKS`, which is a *collection* directive for stage 01 and reimposed gemma's
+`[0, 1, 2]` on a source with eight blocks. Verified by running it end to end on
+`outputs/pcfg/layer_01/`: eight blocks graded, 550 directed edges and 78 duplicates in B0.
+
+**Prevention.** It is now stage **01c** in `run_pipeline.py`, numbered before 02 because that is
+where its dependencies put it — it needs 01 and nothing after. `--list` shows it as `WAIT` beside
+the other unrun stages, so "never run on any layer" is now visible rather than something you have to
+already know. Its two pure functions are also graded by the Tier-1 calibration as of today, which is
+the guard the entry above adds.
+
+---
+
 ## 2026-08-07 — The reporting stages were still gemma-only after `collect()` stopped being   `fixed`
 
 **Symptom.** None yet, and that is the entry. `run_metrics.py` was taught to read the block

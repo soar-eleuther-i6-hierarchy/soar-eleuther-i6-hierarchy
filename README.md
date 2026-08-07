@@ -207,7 +207,7 @@ entry `open`. What that leaves:
 | --- | --- |
 | **Tier-3 semantic reading** | not redone. The site shows regenerated numbers **no human has read**. This is the one that gates any new claim: the old ones are withdrawn and nothing has replaced them |
 | **Stage 03** (`run_token_metrics`) | run on **L6 only**. `run_metrics` labels its own sibling-redundancy figure `global_jaccard_confounded` and defers the verdict to stage 03 — so the published sibling number is the confounded one on four layers of five |
-| **In-block metric** (`in_block_edges`) | never run, on any layer |
+| **In-block metric** (`in_block_edges`) | still never run on a **gemma** layer, but no longer invisible: it is pipeline stage **01c**, its two functions are graded by Tier 1, and it now reads the block structure and decoder from the file it grades — so it has run end to end on PCFG layer 1 (eight blocks, 550 directed edges and 78 duplicates in B0) |
 | **The validator is not wired in** | `contracts/validate_stats.py` rejects a v1 cache, but nothing in the pipeline calls it. It sits in this repo, the pipeline sits in the submodule |
 | **Two withdrawn pages** | `kill_rates.html` and `cross_depth_comparison.html` were hand-built with no generator and reported the fractions that inverted. Archived under `metrics/outputs_archive/` with a banner, not repaired. A cross-depth view should return only behind a generator |
 | **Pages build is at its ceiling** | the last successful build took 10.6 min against a 10-minute limit, and the next one timed out before succeeding on retry. 10 MB of the 17 MB served is `feature_labels.json`, which no published page fetches — it is a build input, not a site asset. A `_config.yml` excluding it from the *site* (not from git) is the fix |

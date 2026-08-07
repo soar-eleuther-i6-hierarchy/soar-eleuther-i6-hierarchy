@@ -4,6 +4,108 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-08-07 18:20 +03 — Six of ten metrics were graded on a known tree, not ten; and the strict test's strictness is a property of dictionary size
+
+**Question.** Every number this project publishes rests on the claim that the battery is calibrated
+where the answer is known. Which metrics does that actually cover?
+
+The question is not rhetorical. The published scorecard says 9/9 and names 13 metric functions, and
+both figures are true — but they describe the functions that read the *reduced statistics*. Four
+functions read per-token residuals instead, and two more live in the within-block script. Whether
+those six were covered anywhere was never checked by anything.
+
+**How it can be answered.** Read the import list of each calibration rather than its prose. A
+function is graded if some calibration *calls* it; no other definition survives contact with a file
+that describes itself.
+
+**What we ran.** Nothing on a GPU. The audit is over the source, then a rebuilt Tier 1.
+
+```bash
+python3 -m validation.calibrate_on_synthetic_toy          # Tier 1, seeds 0-7
+python3 validation/calibrate_on_trained_toy.py            # Tier 2, unchanged
+python3 -m tests.test_calibration_covers_metrics          # the new guard
+```
+
+**Result.** Six of the twenty-one metric functions were called by no calibration:
+
+| function | metric | graded before today |
+| --- | --- | :---: |
+| `train_probe`, `sres_rank_check`, `negative_parent_composition` | 2b — probe `S_res` | **no** |
+| `parent_conditioned_redundancy` | 3' — siblings inside the parent's firing set | **no** |
+| `directed_coverage`, `duplicate_pairs` | 7 — within-block edges | **no** |
+
+Tier 1's own page asserted the first four were "calibrated in Tier 2". Tier 2 imports five
+functions and none of them is one of those four. So the metric that decides which edges survive on
+gemma had never been run against a known answer. Logged separately in
+[`ERROR_LOG.md`](ERROR_LOG.md).
+
+The toy was extended with three structures carrying known answers — an **absorbed** child (fires
+where its parent is silent), a **shared-topic** pair (conditionally independent given a topic, so a
+non-edge), and a within-block **containment + duplicate** pair — and `build_world` now also returns
+the per-token view (`resid`, `fired`, `W_dec`) that `_reduce` had been computing and discarding.
+
+**14/14 rows pass across seeds 0–7, covering 21/21 metric functions.** Tier 2 is untouched and
+re-runs to precision 1.00 / recall 0.67.
+
+The five new rows:
+
+| row | asserts | margin (seed 0) |
+| --- | --- | ---: |
+| 2b probe `S_res` | every true parent accepted; an unrelated one no better than chance | 0.7× |
+| 3' parent-conditioned redundancy | split parent 1.00 vs genuine 0.00 | >1000× |
+| 7 in-block | containment directed, co-extensive pair called a duplicate, graph acyclic | 1.0× |
+| — absorption *(negative control)* | coverage **cannot** propose the edge: R = 0.00 | >1000× |
+| — topical *(negative control)* | the non-edge survives coverage, reconstruction, frequency **and** PMI | 1.0× |
+
+**Interpretation.** Three things, and the second is the one worth carrying into the paper.
+
+*The maths was never the problem.* Every formula checked out against its definition — the ablation
+gain's closed form, PMI against its independence null and its sign-equivalence to Dev, survival as a
+bucket ratio, `S_res` as Tree SAE's `min(.,.)` under the rank rule, and `parent_of` antisymmetric by
+construction. What was missing was evidence that the functions do what they claim, which is a
+different property and was the one being asserted.
+
+*The rank rule's strictness is set by dictionary size, not by `k`.* `sres_rank_check` is a geometry
+test on decoder directions: an unrelated parent passes exactly when chance puts it in the top *k* of
+*D*. So its null rate is `k/D` —
+
+| source | D | null pass rate at k=5 |
+| --- | ---: | ---: |
+| this toy | 42 | 11.9% |
+| PCFG | 1792 | 0.28% |
+| gemma | 32768 | **0.015%** |
+
+The toy's superparent passed 2–4 of 20 against 2.4 expected, i.e. exactly chance — so the first
+version of that row, which asserted `S_res` would *reject* it, was asserting something the rule does
+not claim. **This bears directly on the 11:45 entry above**, which set PCFG's `0/327` beside gemma's
+`10/1700` and read "0% and 0.6%" as the same order. They are not on the same ruler: gemma's 0.6% is
+about 40× its own null rate, while PCFG's zero sits *below* a null rate 19× larger. The comparison
+survives, but it needs stating in those terms rather than as raw shares.
+
+*Two blind spots are now demonstrated rather than argued.* The properties matrix has claimed since
+it was written that absorption is unreachable and topical co-occurrence is caught by nothing. Both
+are now scored rows: the absorbed edge has R = 0.00 and never enters the candidate set, so metrics
+2–9 never see it; the topical non-edge clears coverage, reconstruction, the frequency control and
+PMI with R = 1.00 and PMI = 3.69. A limitation that is measured can regress visibly; one that is
+only written down cannot.
+
+**Answer.** Six of ten metrics were ungraded, including the strict one. All ten are graded now, and
+a test asserts it stays that way. No metric was found to be wrong — the gap was between what the
+battery does and what was known about what it does.
+
+**Caveats.** The toy's `d_model` had to move from 16 to 64 for the rank rule to measure parenthood
+rather than crowding: at 16, three genuine edges failed with the child at rank 0 and the true parent
+displaced to rank 6–8 by unrelated features. That is a defensible modelling fix, not a threshold
+tune — but it is a change made *because* a row failed, and the reason it is recorded here rather
+than only in a commit. The residual-error energy is now held fixed as `d_model` varies so metric
+2a's denominator does not move with it. Two further limits stand: `S_res` probes are self-labeled
+(the circularity caveat in `metrics/sres.py`), which the toy inherits and cannot resolve; and no
+toy can reach gemma's `d = 2304`, so the rank rule is calibrated in a regime friendlier than the one
+it is used in. Tier 2 was not extended — it still grades coverage, reconstruction and the frequency
+control only, so "survives a real training run" remains a claim about three metrics, not ten.
+
+---
+
 ## 2026-08-07 13:40 +03 — Layer 3 of the same PCFG run: the frequency control finds something, and four edges survive
 
 **Question.** Holding the corpus, the base model and every threshold fixed, does the layer
