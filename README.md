@@ -213,15 +213,19 @@ entry `open`. What that leaves:
 | **Stage 03** (`run_token_metrics`) | run on **L6 only**. `run_metrics` labels its own sibling-redundancy figure `global_jaccard_confounded` and defers the verdict to stage 03 — so the published sibling number is the confounded one on four layers of five |
 | ~~**In-block metric** (`in_block_edges`) never run~~ | **run on all seven graded runs** — five gemma layers and both PCFG layers, published as a sixth per-layer page. Same-level structure is a B0 phenomenon on both sources and is not explained by block size. Gemma carries **no S_res column** (the Hub has the stats cache, not the token cache), so those numbers are the entrance to the funnel: where the strict test did run, on PCFG layer 3, it took B0 from 888 edges to 7 |
 | **The validator is not wired in** | `contracts/validate_stats.py` rejects a v1 cache, but nothing in the pipeline calls it. It sits in this repo, the pipeline sits in the submodule |
-| **Two withdrawn pages** | `kill_rates.html` and `cross_depth_comparison.html` were hand-built with no generator and reported the fractions that inverted. Archived under `metrics/outputs_archive/` with a banner, not repaired. A cross-depth view should return only behind a generator |
-| **Pages build is at its ceiling** | the last successful build took 10.6 min against a 10-minute limit, and the next one timed out before succeeding on retry. 10 MB of the 17 MB served is `feature_labels.json`, which no published page fetches — it is a build input, not a site asset. A `_config.yml` excluding it from the *site* (not from git) is the fix |
+| ~~**Two withdrawn pages**~~ | **both views are back, behind a generator** — the condition they were withdrawn on. `depth_profile_across_layers` and `edge_survival_by_block_pair` in [`metrics/outputs/paper_figuers/`](https://soar-eleuther-i6-hierarchy.github.io/metrics/outputs/paper_figuers/) are rebuilt from the committed reports by `reporting/make_report_figures.py`, so a rerun can invalidate them. The hand-built HTML stays archived |
+| ~~**Pages build is at its ceiling**~~ | **no longer true** — the last six builds ran in **40–52 s**, not 10.6 min. `_config.yml` landed on 7 Aug. Still worth doing eventually: 9.8 MB of what is served is `feature_labels.json`, which no published page fetches — a build input, not a site asset |
 
 Nothing here blocks Exp 2. All of it blocks writing Exp 0 up.
 
 Engineering still open, none of it blocking an experiment: `contracts/validate_run_dir.py`
-for the artifact layout; `adapters/from_toy.py` and `from_tinystories.py`; a `pipeline/`
-that runs the chain end to end in one command; dashboards for non-gemma sources
-(`reporting/visualize.py` is built around gemma's block structure).
+for the artifact layout; `adapters/from_tinystories.py`; a `pipeline/` that runs the chain
+end to end in one command.
+
+(`adapters/from_toy.py` and non-gemma dashboards were on this list and are done —
+`from_toy.py` routes the trained toy through the production path, and every reporting stage
+now reads the block structure from the file it is grading, so both PCFG layers publish the
+same page set as a gemma layer.)
 
 ## Related
 

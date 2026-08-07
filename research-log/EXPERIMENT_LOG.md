@@ -491,10 +491,40 @@ densities and no remaining degrees of freedom, so the next question has to come 
 somewhere other than the axis list.
 
 **Caveats.** This entry records a ruling, not a measurement; the numbers in it are all
-carried from earlier entries and none were re-run. The reading that the zipf generator
-cannot vary global frequency rests on one measurement of one corpus at `zipf 1.5` — whether
-the other five exponents behave the same way was never checked, and a high enough exponent
-might concentrate the corpus marginal even under re-permutation.
+carried from earlier entries and none were re-run.
+
+~~The reading that the zipf generator cannot vary global frequency rests on one measurement of
+one corpus at `zipf 1.5` — whether the other five exponents behave the same way was never
+checked, and a high enough exponent might concentrate the corpus marginal even under
+re-permutation.~~
+
+**Closed 7 Aug, by construction rather than by measurement.**
+`PCFGGenerator._permutations(doc_id)` draws a **uniform random permutation** of each terminal
+list, seeded per document. A uniform permutation gives every token id every rank with
+probability `1/N`, so the corpus-wide marginal of any id is
+
+    P(t) = Σ_k p_k · (1/N) = (1/N) Σ_k p_k = 1/N
+
+— exactly uniform, for **every** exponent, independent of `s`. Simulated over 4,000 documents
+to check the algebra against the code:
+
+| `zipf_exponent` | top-10 share *within* a document | top-10 share *across* the corpus |
+| ---: | ---: | ---: |
+| 0.0 | 15.0% | 3.5% |
+| 1.0 | 45.0% | 3.8% |
+| 1.5 | 78.5% | 4.3% |
+| 2.0 | 93.0% | 4.6% |
+| **3.0** | **100.0%** | **5.0%** |
+
+Uniform would be 3.3%. At `s = 3` ten terminals take the *entire* document and still hold
+5.0% of the corpus. The axis moves within-document concentration from 15% to 100% and leaves
+the global marginal essentially flat throughout.
+
+So the retirement is **not** provisional on measuring the remaining five exponents: no exponent
+this generator accepts can vary the quantity the hypothesis names. It needs no corpus fetch and
+no compute-node run. What would reopen it is a change to the generator — dropping the
+per-document permutation, or exempting some ids from it, which is what already makes `EOS` the
+one globally frequent token on this axis.
 
 ---
 
