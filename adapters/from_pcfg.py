@@ -21,19 +21,20 @@ Reads only. It never writes into the run directory, which on the compute node li
 under another user's account.
 
 To publish a run as a page instead of a scratch file, write into the metrics site's
-output tree and run the remaining stages against it. EXP0_RUN names the directory,
-because this is not a gemma layer:
+output tree and run the remaining stages against it. EXP0_RUN names the directory:
 
-    export EXP0_RUN=pcfg
+    export EXP0_RUN=pcfg/layer_01
     python3 adapters/from_pcfg.py --run-dir data/pcfg-run --layer 1 \\
-            --out metrics/outputs/pcfg/exp0_stats.pt
+            --out metrics/outputs/pcfg/layer_01/exp0_stats.pt
     cd metrics
-    python3 run_metrics.py --stats outputs/pcfg/exp0_stats.pt --out-dir outputs/pcfg
+    python3 run_metrics.py --stats outputs/pcfg/layer_01/exp0_stats.pt \\
+            --out-dir outputs/pcfg/layer_01
     python3 run_token_metrics.py          # S_res, off the token cache + w_dec.pt
-    python3 -m reporting.visualize        # -> outputs/pcfg/*.html
+    python3 -m reporting.visualize        # -> outputs/pcfg/layer_01/*.html
 
-Keep the run directly under outputs/: the nav bar and the shared plotly bundle both
-assume one level, and a `layer_NN` name would claim a gemma layer this is not.
+Source first, layer second -- the same shape as gemma's outputs/gemma2_2b/layer_NN/.
+The source needs an entry in metrics/config.py's SOURCES to appear in the nav with
+its own layer row.
 """
 
 from __future__ import annotations

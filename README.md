@@ -110,7 +110,7 @@ which meant S_res — the strict test — could not run off gemma at all, and a 
 from a PCFG cache would have drawn four plausible block pairs from the wrong feature columns
 before raising on the fifth. Both now read the structure from the file they are grading, and
 a non-gemma run publishes under its own name: `EXP0_RUN=pcfg` puts the pages at
-`outputs/pcfg/` beside the layer directories. See [`research-log/ERROR_LOG.md`](research-log/ERROR_LOG.md).
+`outputs/pcfg/layer_01/`, the same source/layer shape as gemma's. See [`research-log/ERROR_LOG.md`](research-log/ERROR_LOG.md).
 
 The experiments are not parallel studies — they are a ladder trading ground truth against realism,
 and each rung licenses the one above it:
@@ -164,14 +164,15 @@ different prefixes are not directly comparable — see the 7 August experiment-l
 Then the four stages, publishing under the run's own name:
 
 ```bash
-export EXP0_RUN=pcfg
+export EXP0_RUN=pcfg/layer_01
 python3 adapters/from_pcfg.py --run-dir data/pcfg-run --layer 1 --docs 3400 \
-        --out metrics/outputs/pcfg/exp0_stats.pt
+        --out metrics/outputs/pcfg/layer_01/exp0_stats.pt
 cd metrics
-python3 run_metrics.py --stats outputs/pcfg/exp0_stats.pt --out-dir outputs/pcfg
+python3 run_metrics.py --stats outputs/pcfg/layer_01/exp0_stats.pt --out-dir outputs/pcfg/layer_01
 python3 run_token_metrics.py                      # S_res, off the token cache
 python3 -m reporting.visualize                    # the dashboards
-python3 -m reporting.layer_index --run            # the directory's index page
+python3 -m reporting.layer_index --run            # the layer's index page
+python3 -m reporting.layer_index --source pcfg    # the source's index page
 ```
 
 The two environments are separate on purpose: `sae-training` requires Python ≥3.12 and
@@ -187,7 +188,7 @@ artifact volume. See [`docker/README.md`](docker/README.md) for what those image
 | Exp 0 — metric battery | code complete; 10 metrics, 3 validation tiers + a control, 5 gemma layers, [published](https://soar-eleuther-i6-hierarchy.github.io/metrics/). **The findings are not** — see below |
 | Exp 2 — PCFG pipeline | corpora + base-model training complete; 58 base models across four sweeps |
 | Exp 2 — SAE side | Matryoshka complete and wired to the PCFG run layout |
-| Metrics handoff | **done, and now all four stages** — [`adapters/from_pcfg.py`](adapters/from_pcfg.py) feeds a token cache and the run's own decoder, so S_res runs on PCFG too. First published non-gemma run: [`metrics/outputs/pcfg/`](metrics/outputs/pcfg/README.md) — zipf 1.5, 1792 latents in 8 blocks, 1,016,600 tokens, metric code untouched |
+| Metrics handoff | **done, and now all four stages** — [`adapters/from_pcfg.py`](adapters/from_pcfg.py) feeds a token cache and the run's own decoder, so S_res runs on PCFG too. First published non-gemma run: [`metrics/outputs/pcfg/layer_01/`](metrics/outputs/pcfg/layer_01/README.md) — zipf 1.5, 1792 latents in 8 blocks, 1,016,600 tokens, metric code untouched |
 | **Zipf axis** | **the blocker.** Base models exist at all six exponents; SAEs exist at `1.5` only. One point is not a curve |
 | Exp 3 — cross-method | blocked: T-SAE's contrastive loss and Priors-in-Time's post-hoc clustering are unfinished |
 
