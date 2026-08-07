@@ -19,6 +19,21 @@ stop being true and the paper's central claim would go with it.
 
 Reads only. It never writes into the run directory, which on the compute node lives
 under another user's account.
+
+To publish a run as a page instead of a scratch file, write into the metrics site's
+output tree and run the remaining stages against it. EXP0_RUN names the directory,
+because this is not a gemma layer:
+
+    export EXP0_RUN=pcfg
+    python3 adapters/from_pcfg.py --run-dir data/pcfg-run --layer 1 \\
+            --out metrics/outputs/pcfg/exp0_stats.pt
+    cd metrics
+    python3 run_metrics.py --stats outputs/pcfg/exp0_stats.pt --out-dir outputs/pcfg
+    python3 run_token_metrics.py          # S_res, off the token cache + w_dec.pt
+    python3 -m reporting.visualize        # -> outputs/pcfg/*.html
+
+Keep the run directly under outputs/: the nav bar and the shared plotly bundle both
+assume one level, and a `layer_NN` name would claim a gemma layer this is not.
 """
 
 from __future__ import annotations
@@ -161,7 +176,8 @@ def load_corpus_seqs(corpus_path: Path, context: int, n_docs: int, pad_id: int,
     return seqs
 
 
-def make_cfg(sae_cfg: dict, layer: int, out_dir: Path, context: int, local_freq: bool = False):
+def make_cfg(sae_cfg: dict, layer: int, out_dir: Path, context: int, local_freq: bool = False,
+             cache_residuals: bool = True):
     """Block structure and thresholds for THIS SAE, not gemma's.
 
     collect(cfg=...) exists for this: metrics/config.py hardcodes a 32768-feature
@@ -197,7 +213,14 @@ def make_cfg(sae_cfg: dict, layer: int, out_dir: Path, context: int, local_freq:
         # so the global control is blind to it; this is what sees it.
         LOCAL_FREQ_BUCKETS=local_freq,
         MIN_JOINT=30,
-        CACHE_RESIDUALS=False,
+        # On by default here, unlike gemma. S_res is the strict test -- the one
+        # the survival numbers actually turn on -- and it runs only off the token
+        # cache, so without this a PCFG run is gradeable on three of the five
+        # filter stages and cannot be compared with a gemma layer on the one that
+        # matters. Affordable at this scale: gemma's cache is ~700 MB/layer at
+        # d_model=2304, the toy's is a few hundred MB of fp16 at d_model in the
+        # low hundreds. --no-token-cache turns it off.
+        CACHE_RESIDUALS=cache_residuals,
         TOKEN_CACHE_DIR=out_dir / "token_cache",
         EXP0_STATS_PATH=out_dir / "exp0_stats.pt",
     )
@@ -213,6 +236,9 @@ def main() -> int:
     ap.add_argument("--pad-id", type=int, default=None, help="default: vocab_size, asserted absent")
     ap.add_argument("--local-freq", action="store_true",
                     help="also accumulate the frequency control bucketed within each window")
+    ap.add_argument("--no-token-cache", action="store_true",
+                    help="skip the fp16 residual/latent cache; stage 03 (S_res, the strict "
+                         "test) then cannot run for this SAE")
     args = ap.parse_args()
 
     from collect_statistics import collect  # noqa: E402  (needs the sys.path above)
@@ -238,7 +264,8 @@ def main() -> int:
     pad_id = args.pad_id if args.pad_id is not None else int(model_cfg["vocab_size"])
     out_dir = args.out.parent if args.out else run_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    cfg = make_cfg(sae_cfg, args.layer, out_dir, context, local_freq=args.local_freq)
+    cfg = make_cfg(sae_cfg, args.layer, out_dir, context, local_freq=args.local_freq,
+                   cache_residuals=not args.no_token_cache)
 
     grammar = {}
     manifest = run_dir / "manifest.json"
@@ -282,6 +309,16 @@ def main() -> int:
             "sae_cfg": sae_cfg,
         },
     )
+
+    # The second pass needs this SAE's decoder to turn a probe direction into
+    # per-feature correlations, and it has no way to find a PCFG run on its own --
+    # its default is the released gemma SAE. Dropping W_dec beside the statistics
+    # is the whole hand-off: run_token_metrics picks up RUN_DIR/w_dec.pt without
+    # being told, and the metrics repo stays free of PCFG layout knowledge.
+    if not args.no_token_cache:
+        w_dec_path = (args.out.parent if args.out else run_dir) / "w_dec.pt"
+        torch.save(sae.W_dec.detach().cpu(), w_dec_path)
+        print(f"[pcfg] decoder -> {w_dec_path}")
 
     # Fail loudly here rather than let a malformed object reach the metrics, which
     # would return plausible numbers computed from the wrong tensors.
