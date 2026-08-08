@@ -1,3 +1,5 @@
+ا 
+
 # Error log
 
 Newest first. One entry per error that cost time or could have corrupted a result.
@@ -101,12 +103,13 @@ feature at a time.
 **Prevention.** The test is the prevention, and it was verified in the failing direction by
 injecting four real errors, none of which Tier 1 would have caught:
 
-| injected error | caught |
-| --- | :---: |
-| drop the factor of 2 in the ablation gain | ✅ |
-| divide coverage by the parent instead of the child | ✅ |
-| forget to normalise the independence null by `N` | ✅ |
-| let the in-block graph become cyclic | ✅ |
+
+| injected error                                     | caught |
+| ---------------------------------------------------- | :------: |
+| drop the factor of 2 in the ablation gain          |   ✅   |
+| divide coverage by the parent instead of the child |   ✅   |
+| forget to normalise the independence null by`N`    |   ✅   |
+| let the in-block graph become cyclic               |   ✅   |
 
 It also asserts that the toy world carries the six signatures it documents, so a structure
 quietly losing its intended shape fails here rather than in a scorecard row that still passes.
