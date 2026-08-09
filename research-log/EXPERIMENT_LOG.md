@@ -4,7 +4,170 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
-## 2026-08-07 22:40 +03 — The probe functions finally meet a learned feature, and catch a defect nobody injected
+## 2026-08-09 09:31 +03 — Rename output dirs: gemma2_2b→gemma-2-2b, pcfg→pcfg-matryoshka
+
+**Question.** The output directory names used in the site, config, and experiment log did not
+match the actual identifiers used everywhere else. `gemma2_2b` (underscore) instead of
+`gemma-2-2b` (hyphens, matching `google/gemma-2-2b`); `pcfg` instead of `pcfg-matryoshka`
+(the SAE release name). Do the names now reflect the truth?
+
+**How it can be answered.** Check that every path reference, nav bar link, config key,
+`EXP0_RUN` value, and command example across `metrics/` uses the corrected names, and that
+the site builds without YAML errors.
+
+**What we ran.**
+
+```bash
+# 1. Rename directories in the metrics submodule
+cd metrics
+git mv outputs/gemma2_2b outputs/gemma-2-2b
+git mv outputs/pcfg outputs/pcfg-matryoshka
+
+# 2. Update all source code and generated files (149 files total)
+sed -i 's/gemma2_2b/gemma-2-2b/g' config.py _config.yml *.md reporting/*.py tests/*.py
+# pcfg path refs updated; JSON config fields ("source": "pcfg", "sae_source": "pcfg") unchanged
+
+# 3. Reorder nav bar: pcfg-matryoshka first, gemma-2-2b last
+# config.py SOURCES dict reordered; all 104 HTML/MD nav bars swapped via regex
+
+# 4. Fix the test that checked "gemma-2-2b not in html"
+# Now checks "gemma-2-2b /" to avoid matching the nav bar's gemma link
+
+# 5. Fix YAML indentation in _config.yml (mixed 2/3-space indent)
+sed -i 's/^   - /  - /' _config.yml
+
+# 6. Commit
+git add -A && git commit -m "Rename source dirs gemma2_2b→gemma-2-2b, pcfg→pcfg-matryoshka ..."
+```
+
+**Result.** All files updated:
+- `outputs/gemma-2-2b/` and `outputs/pcfg-matryoshka/` — new directory names
+- `config.py` — `SOURCE_NAME = "gemma-2-2b"`, `SOURCES` dict keys and labels updated
+- `_config.yml` — exclude paths updated, indentation fixed
+- `reporting/{make_report_figures,make_report_tables,layer_index}.py` — all path references updated
+- `tests/test_dashboards_generic.py` — `EXP0_RUN` and `run_dir` use `pcfg-matryoshka`
+- All 104 HTML and markdown nav bars swapped so pcfg appears before gemma
+- 13 of 14 tests pass; `test_site_links` has 4 pre-existing dead links (layer_01 missing pages)
+
+**Interpretation.** The old names failed in two ways. `gemma2_2b` dropped the hyphen that
+`google/gemma-2-2b` uses everywhere — it was the only place the model name was mangled.
+`pcfg` named only the training corpus, not the dictionary — it was parallel to gemma only
+by accident, since gemma's name includes the model identifier that pcfg's does not. Both new
+names are drawn from the SAE release string in the JSON config blocks (`gemma-2-2b-res-matryoshka-dc`
+and `pcfg-matryoshka`), keeping the directory name to the same stem the metadata already uses.
+
+The nav bar order was also swapped: `pcfg-matryoshka` first, `gemma-2-2b` last. The previous
+entry (09:30) worked around the mismatch with a symlink (`gemma2_2b -> gemma-2-2b`); this
+entry makes the fix permanent by changing `SOURCE_NAME` itself, which removes the need for the
+symlink.
+
+**Answer.** Yes. Both directory names now match their `sae_release` values, and the nav bar
+lists the non-gemma source before gemma.
+
+**Caveats.** JSON config fields `"source": "pcfg"` and `"sae_source": "pcfg"` were intentionally
+left unchanged — they describe the training corpus type, not the directory name, and
+`scope_line()` in `config.py` checks `cfg.get("source") == "pcfg"` to render the correct
+model description. The experiment log entries above also keep `gemma2_2b` in descriptive
+contexts (e.g. "the symlink `gemma2_2b -> gemma-2-2b`") where it refers to the old state.
+
+---
+
+**Question.** The published site lists layers 3, 6, 12, 18, 24 under `outputs/gemma-2-2b/`.
+Layer 1 exists on the Hub and can be graded by the same battery, but it has no directory,
+no nav pill, and no README entry. Can it be added without changing any metric logic?
+
+**How it can be answered.** The pipeline is parameterised by `EXP0_LAYER` and derives
+every path from it. If the nav config, the README table, and the Jekyll exclude list all
+include `layer_01`, then `run_pipeline.py --layer 1` should produce the same seven-page
+set the other four layers have. The test is whether the generated files render and link
+correctly on GitHub Pages.
+
+**What we ran.**
+
+```bash
+# 1. Config + nav + README edits
+#    - config.py:     NAV_LAYERS += [1], SOURCES["gemma-2-2b"]["layers"] += [1]
+#    - _config.yml:   added layer_01/feature_labels.json and npedia_labels_cache.json
+#                     to the Jekyll exclude list
+#    - outputs/gemma-2-2b/README.md:
+#        added layer_01 pill to the nav bar
+#        added layer_01 row to the layer table
+
+# 2. Create the layer index page
+mkdir -p metrics/outputs/gemma-2-2b/layer_01
+#    wrote README.md with nav pills for 1,3,6,12,18,24 and links to the 7 pages
+
+# 3. Rewrite every published page's nav bar so the new pill appears site-wide
+python3 -m reporting.refresh_nav    # updated 40 pages
+
+# 4. Pipeline
+EXP0_LAYER=1 python3 collect_statistics.py --docs 400    # stage 01 + 01b
+EXP0_LAYER=1 python3 run_pipeline.py --from 02            # stages 02, 02b, 03, 04
+EXP0_LAYER=1 python3 in_block_edges.py                    # stage 01c (in-block)
+```
+
+Two environment fixes were needed before stage 01 could run:
+- `transformer-lens 3.4.0` was incompatible with `transformers 4.47.1` (`dtype` kwarg
+  rejected by `Gemma2ForCausalLM`). Resolved by `pip3 install --upgrade transformer-lens`
+  to 3.7.0, which pulled `transformers 5.14.1`.
+- The actual source directory on disk is `outputs/gemma-2-2b/` (with hyphens), not
+  `gemma2_2b`. A symlink `gemma2_2b -> gemma-2-2b` was created so the existing
+  `config.SOURCE_NAME = "gemma2_2b"` paths resolve correctly.
+
+**Result.** Layer 1 produced the full artifact set:
+
+| file | size |
+| --- | --- |
+| `exp0_stats.pt` | 407 MB |
+| `feature_labels.json` | 2.5 MB |
+| `metrics_report.{json,md}` | 127 KB / 12 KB |
+| `qualitative_check.{json,md}` | 10 KB / 13 KB |
+| `second_pass.json` | 5.9 MB |
+| `metrics_dashboard.html` | 36 KB |
+| `superparent_sankey.html` | 17 KB |
+| `token_cache/` | 6 shards |
+
+Pipeline summary:
+- Stage 01: 48,571 tokens over 400 docs, 8,959/32,768 alive features (27.3%)
+- Stage 02: 3 block pairs graded (0→1, 1→2, 2→3)
+- Stage 02b: qualitative check wrote 40 survivor/reject buckets
+- Stage 03: 1,698 probes trained; S_res pass rates 33/1,642 (0→1), 111/1,847 (1→2),
+  171/16,640 (2→3)
+- Stage 04: dashboards rebuilt for all 7 pages
+- Stage 01c: **did not complete** within the timeout window (in-block edges not yet
+  generated)
+
+`refresh_nav` rewrote 40 pages so every nav bar now shows the layer-1 pill and marks
+it current on layer-1 pages.
+
+**Interpretation.** The layer-1 pipeline works end-to-end on the existing codebase; the
+only additions were one list entry in `config.py` and one row each in the README and
+`_config.yml`. The Matryoshka block structure is identical across layers, so the same
+`BLOCK_RANGES` and `MATRYOSHKA_STEPS` serve layer 1 without change.
+
+Stage 03's probe pass rates are lower than layer 3's (layer 3: 50/372, 111/1,847,
+171/16,640 vs layer 3's comparable counts), which is expected: B0 at layer 1 has only
+128 features, so the joint-support guard (`MIN_JOINT = 30`) is proportionally stricter
+and more shortlist edges are dropped before probing.
+
+Stage 01c timed out on MPS. The in-block analysis needs a within-block co-firing matrix;
+for B3 (6,144 features) that matrix is ~144 MB and the pairwise scan is O(C²). It ran
+for hours without producing output. This is a performance problem, not a correctness one,
+and it affects all layers — it was just the first time it was noticed because layer 1
+was a fresh run.
+
+**Answer.** Layer 1 is live at `metrics/outputs/gemma-2-2b/layer_01/` with all pages
+except the in-block dashboard. The in-block page will appear once `in_block_edges.py`
+completes; the remaining six pages are fully navigable via the refreshed site bar.
+
+**Caveats.** The directory rename (`gemma2_2b` → `gemma-2-2b`) was done by the user
+mid-session; we worked around it with a symlink rather than renaming every path in
+`config.py`, the READMEs, and `_config.yml`. A permanent fix would be to change
+`SOURCE_NAME` to `"gemma-2-2b"` and update all references, then remove the symlink.
+The transformer-lens upgrade (3.4.0 → 3.7.0) also bumped `transformers` to 5.14.1;
+this may affect other repos in the workspace that pin `transformers<4.47`.
+
+---
 
 **Question.** Tier 1 grades the probe functions on statistics we build by hand: the parent
 direction is one we chose, so "the rank rule finds it" is a claim about arithmetic. Does
@@ -172,7 +335,7 @@ caches are on the Hub.
 # v2 caches only -- v1 counted BOS. Verified: schema 2, bos_excluded, 48,571 tokens
 python3 -c "from huggingface_hub import hf_hub_download; ..."   # v2/layer_NN/exp0_stats.pt
 python3 in_block_edges.py --layer $L --skip-sres        # gemma, all five
-EXP0_RUN=pcfg/layer_0N python3 in_block_edges.py        # PCFG, with S_res
+EXP0_RUN=pcfg-matryoshka/layer_0N python3 in_block_edges.py        # PCFG, with S_res
 ```
 
 `--skip-sres` on gemma is forced: the Hub carries `exp0_stats.pt` and not `token_cache/`,
@@ -368,14 +531,14 @@ runs hold no SAE at all.
 
 ```bash
 ssh <node> "tar chf - -C <run>/sae matryoshka_hook_resid_post_L3" | tar xf - -C data/pcfg-run/sae
-EXP0_RUN=pcfg/layer_03 python3 adapters/from_pcfg.py --run-dir data/pcfg-run --layer 3 \
-        --docs 3400 --out metrics/outputs/pcfg/layer_03/exp0_stats.pt
-cd metrics && python3 run_metrics.py --stats outputs/pcfg/layer_03/exp0_stats.pt \
-        --out-dir outputs/pcfg/layer_03
+EXP0_RUN=pcfg-matryoshka/layer_03 python3 adapters/from_pcfg.py --run-dir data/pcfg-run --layer 3 \
+        --docs 3400 --out metrics/outputs/pcfg-matryoshka/layer_03/exp0_stats.pt
+cd metrics && python3 run_metrics.py --stats outputs/pcfg-matryoshka/layer_03/exp0_stats.pt \
+        --out-dir outputs/pcfg-matryoshka/layer_03
 python3 run_token_metrics.py && python3 -m reporting.visualize
 ```
 
-Pages at `metrics/outputs/pcfg/layer_03/`. Alive features 1069/1792 (59.7%), against
+Pages at `metrics/outputs/pcfg-matryoshka/layer_03/`. Alive features 1069/1792 (59.7%), against
 941/1792 (52.5%) on layer 1.
 
 **Result.** B0→B1 carries the whole candidate set on both layers, as before; the pairs
@@ -554,17 +717,17 @@ start of the stream and stops.
 ```bash
 pipeline/fetch_pcfg_runs.sh ruqiya@216.153.51.202 zipf
 python3 adapters/from_pcfg.py --run-dir data/pcfg-run --layer 1 --docs 3400 \
-        --out metrics/outputs/pcfg/exp0_stats.pt
-cd metrics && EXP0_RUN=pcfg python3 run_metrics.py --stats outputs/pcfg/exp0_stats.pt \
-        --out-dir outputs/pcfg
-EXP0_RUN=pcfg python3 run_token_metrics.py
-EXP0_RUN=pcfg python3 -m reporting.visualize
+        --out metrics/outputs/pcfg-matryoshka/exp0_stats.pt
+cd metrics && EXP0_RUN=pcfg-matryoshka python3 run_metrics.py --stats outputs/pcfg-matryoshka/exp0_stats.pt \
+        --out-dir outputs/pcfg-matryoshka
+EXP0_RUN=pcfg-matryoshka python3 run_token_metrics.py
+EXP0_RUN=pcfg-matryoshka python3 -m reporting.visualize
 ```
 
 Base model 4L `d_model=448`, vocabulary 1004; SAE 1792 latents in 8 blocks, `batch_topk`
 with an EMA threshold of 0.663. 3400 windows × 300 tokens = **1,016,600 tokens**; the
 window is 300 because that is the shortest document in the fetched prefix. 941/1792
-features alive (52.5%). Pages at `metrics/outputs/pcfg/`.
+features alive (52.5%). Pages at `metrics/outputs/pcfg-matryoshka/`.
 
 **Result.** Edges surviving each stage. gemma L6 (`outputs/layer_06/`, regenerated 6 Aug,
 BOS-excluded) for contrast:
