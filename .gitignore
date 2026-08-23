@@ -20,6 +20,9 @@ venv/
 outputs_local/
 scratch/
 *.log
+scripts/hf_sync/upload_manifest.tsv
+scripts/hf_sync/upload_status.tsv
+scripts/hf_sync/upload_log.txt
 
 # Heavy caches — hosted on the Hub, never in git
 *.pt
