@@ -64,6 +64,55 @@ a test, a contract. "Be careful next time" is not prevention.
 
 ---
 
+## 2026-09-12 — Two copies of the same training sweep ran at once, writing to the same directories   `fixed`
+
+**Symptom.** Training slowed to about 16 minutes per run against a measured 10. Nothing else
+looked wrong. The progress log counted up normally, because it was one of the two logs.
+
+**How it surfaced.** Not from the slowdown, which was read at first as ordinary variation. It
+surfaced on a routine check of the process list, which showed two `train_toy.py` processes
+where the script runs one at a time.
+
+**Root cause.** The sweep was launched twice. The first launch wrapped the script in `nohup`
+inside a backgrounded Bash call. That call was reported as completed, and the log it had been
+writing stopped after one line, so the run was taken to be dead. It was not. The `nohup`
+process had been orphaned to init and kept running for two hours, while a second launch ran
+the same sweep beside it.
+
+The mistake in reasoning is worth stating on its own: a background process whose output stops
+arriving has not necessarily stopped. Output and liveness are different facts, and only one of
+them was checked.
+
+**Blast radius.** No result is affected, and this was verified rather than assumed. All 20
+checkpoints written up to that point load, produce finite outputs, and are 11,116 bytes each,
+so none was truncated by a second writer. Within every cell all checkpoints have distinct
+weight hashes, so no run was silently overwritten by another. The two processes were executing
+the same command with the same seed, so whichever wrote last produced what was intended.
+
+The cost was wall-clock time. Each process held about 67% of a core instead of a whole one.
+
+The near miss is the part worth keeping. Had the two launches differed in seed or in tree, the
+checkpoints would have been a mixture of two sweeps, every file would still have loaded, and
+nothing downstream would have objected.
+
+**Fix.** The orphaned script and its child were killed. The surviving sweep finished at the
+measured rate. Every checkpoint was validated as described above before any measurement was
+run on it.
+
+**Prevention.** Two changes in habit, neither yet in code. Launch long jobs through the task
+runner rather than `nohup`, so the process is tracked rather than orphaned. And when a job is
+believed finished, check `pgrep`, not only its log.
+
+A guard is also now in the sweep script. It checked for an existing `cfg.json` before
+training a cell, which reports what finished but does nothing when two processes start the
+same cell within seconds of each other. Each cell is now claimed with `mkdir`, which is
+atomic, so exactly one process can hold it and the other reports the cell as busy and moves
+on. Tested with two copies started together: one claims, one declines.
+
+**Closes when.** `fixed`.
+
+---
+
 ## 2026-09-11 — The Temporal SAE was compared against a Matryoshka baseline graded before the BOS fix   `fixed`
 
 **Symptom.** `I6-F008` reported that the T-SAE's edge density is 1,760 times lower than

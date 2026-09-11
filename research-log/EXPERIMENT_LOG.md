@@ -47,6 +47,12 @@ Predictive-code cosine similarity between consecutive timesteps:
 | `pit_decorr` | 0.7654 | 0.7987 | 0.03 |
 | `pit_null` | 0.4270 | 0.8954 | 0.47 |
 
+> **Superseded on 2026-09-12.** These three numbers are a three-seed reading and they do not
+> survive five more seeds per cell. The null moves from 0.4270 to 0.7777 and becomes the
+> highest of the three rather than the lowest. The predictive-code claim below is withdrawn.
+> The novel-code claim is unaffected and is stronger at eight seeds. See the entry of
+> 2026-09-12 and `findings/I6-F011`.
+
 **Interpretation.** The novel-code ratio exceeds one in all three cells including the null, where
 the data contains no events. The measure separates "a parent's state changed" from "it did not",
 and does not separate data with events from data without.
@@ -72,6 +78,61 @@ The toy's events are parent-state flips; the paper's are narrative boundaries la
 language model. Alike in structure, not in content.
 
 ---
+
+## 2026-09-12 — Five more seeds per cell, and a measure that did not survive them
+
+**Question.** `I6-F011` reported two things. The novel code rises at a planted change in the
+null as well, which was a stated prediction failing. And predictive-code cosine separated the
+null at 0.43 against 0.93, which was not stated in advance. Three seeds cannot tell a real
+effect of that size from the draw. The second claim was the reason to run more.
+
+**Run.** Five further seeds per cell, 3 to 7, on the same recipe: `--arch priors_in_time
+--temporal_data on`, topk k=2, 40k steps, batch 200 by seq 16. Fifteen runs on CPU, about ten
+minutes each. Every checkpoint records its seed and its tree, which the earlier nine do not,
+because the `priors_in_time` branch of `train_toy.py` was not forwarding either field.
+
+**Result, the stated prediction.** Eight seeds per cell.
+
+| condition | novel ratio | spread | range |
+| --- | --- | --- | --- |
+| temporal, original | 1.832 | 0.359 | 1.29 to 2.21 |
+| temporal, decorrelated | 2.221 | 0.408 | 1.66 to 2.85 |
+| null, no events | 1.705 | 0.139 | 1.50 to 2.00 |
+
+The failure of the second prediction is stronger at eight seeds than at three. The null is above
+one at every seed, its range overlaps both temporal conditions, and it has the tightest spread
+of the three. A noisy measurement would not look like this.
+
+**Result, the measure that was not stated in advance.** It does not survive.
+
+| condition | 3 seeds | 8 seeds |
+| --- | --- | --- |
+| temporal, original | 0.931 | 0.663 |
+| temporal, decorrelated | 0.765 | 0.750 |
+| null | 0.427 | 0.778 |
+
+The null was the lowest of the three and is now the highest. Its eight readings are 0.135,
+0.990, 0.156, 0.986, 0.973, 0.996, 0.991 and 0.994. The first three seeds happened to contain
+two low values. The five new seeds are all above 0.97. Spread across seeds is 0.24 to 0.40 on a
+measure bounded in [-1, 1], and the three cells overlap completely.
+
+**Reading.** The finding is cleaner than before. It is now one supported claim rather than a
+supported claim beside a promising one. The withdrawn measure is worth keeping in the record
+because of how it behaved: it was reproducible, it came straight out of the run, and it was
+still an artefact of which three seeds were drawn.
+
+The label put on it at the time, not stated in advance, is what made this checkable. Without it
+there would have been no reason to spend two and a half hours of training on a number that
+already looked good.
+
+**What this does not show.** The toy is small and a boundary in it is one binary flip. The
+evaluation data is a single fixed draw for every cell and seed, `torch.manual_seed(123)`, so
+the variation here is model initialisation and not data. A second data draw is a further
+control and was not run.
+
+**Files.** `metrics/outputs/toy-temporal/priors_in_time_boundary.json` now records every
+per-seed measurement rather than means alone. Claim: `findings/I6-F011`, renamed, because its
+old filename carried the withdrawn claim.
 
 ## 2026-09-11 — The fourth block pair on gemma layer 12, B3->B4
 
