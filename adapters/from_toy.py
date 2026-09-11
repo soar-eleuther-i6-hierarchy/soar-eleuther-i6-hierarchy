@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Trained-toy SAE -> cached statistics, through the same path gemma and PCFG take.
 
-Tier 2 already reports precision 1.00 / recall 0.67 on this checkpoint, but it gets
+Tier 2 already reports precision 1.00 / recall 1.00 on this checkpoint, but it gets
 there by calling the metric functions directly with thresholds written into the
 script. It never touches collect() or run_metrics.py, so the one published number
 that could validate the whole pipeline validates only the metrics.

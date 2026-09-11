@@ -53,7 +53,7 @@ the same `exp0_stats.pt` as before. A refactor that changes any number has broke
    python3 contracts/validate_stats.py <your_output>.pt
    ```
 4. **Reproduce a known number.** Write `from_toy.py` first even though Exp 2 needs `from_pcfg.py`,
-   because the toy has a published answer: precision 1.00, recall 0.67, 6 of 9 edges, zero false
+   because the toy has a published answer: precision 1.00, recall 1.00, 9 of 9 edges, zero false
    positives. An adapter that routes the toy through the generic path must land on exactly that.
 
 Step 4 is the one that matters. Wrong statistics do not crash — they produce plausible numbers that

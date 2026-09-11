@@ -64,6 +64,155 @@ a test, a contract. "Be careful next time" is not prevention.
 
 ---
 
+## 2026-09-11 — The Temporal SAE was compared against a Matryoshka baseline graded before the BOS fix   `fixed`
+
+**Symptom.** `I6-F008` reported that the T-SAE's edge density is 1,760 times lower than
+Matryoshka's. The true figure against a matched baseline is 794 times, and 28 times against the
+Matryoshka pair closest in block shape. The Matryoshka row also claimed 5 superparents where the
+correct count is 2, and 34,061 candidate edges at `1->2` where the correct count is 621.
+
+**How it surfaced.** Not from the comparison itself, which looked plausible. It surfaced while
+running an unrelated job: a fresh collection on the node to add the `B3->B4` block pair. That run
+reproduced the committed Matryoshka report exactly, 48,571 tokens and 1,473 / 621 / 1,747 edges,
+which meant the baseline in use, at 48,971 tokens and 3,260 / 34,061, could not be the same
+measurement.
+
+**Root cause.** The baseline was a report graded before BOS positions were excluded from the
+co-firing counts. BOS is an attention sink. With 400 documents, every feature pair collected 400
+joint firings from the BOS position alone, which clears `MIN_JOINT = 30` on its own, so the
+co-fire guard admitted nearly every pair in the dictionary.
+
+Three things had to line up for this to pass unnoticed. The file was pulled from the GPU node,
+where an old statistics cache still sat beside the current one. `run_metrics.py` echoes the
+config recorded inside the cache, so the report it wrote carried the *old* config block and did
+not raise. And the 400-token gap was read as one extra document, which is the right order of
+magnitude and the wrong mechanism.
+
+**Blast radius.** `I6-F008` and the `tsae-gemma-pipeline` table in `tsaes-tables.tex`, both now
+regraded. `I6-F009` is provably unaffected: the probe table reads
+`gemma-2-2b/layer_12/second_pass.json`, which was never the withdrawn file, and that file records
+`bos_excluded: true`. `I6-F007` is unaffected, being a property of the T-SAE checkpoint alone. The
+paper's own gemma numbers were never wrong; the committed report has been correct throughout, and
+the fresh run confirms it.
+
+**Fix.** `reporting/make_tsae_report.py` reads `gemma-2-2b/layer_12/metrics_report.json`. The old
+report moved to `gemma-2-2b/layer_12/withdrawn/` with a README naming the four signals that
+identify a pre-BOS file. `I6-F008`, the T-SAE directory README and the 2026-09-11 log entry are
+rewritten with the corrected table.
+
+**Prevention.** Two checks, because a rule that lives only in prose did not hold.
+
+`reporting/temporal_common.py:read` now refuses any metrics report whose `config` block omits
+`bos_excluded` or `min_joint`. Those keys entered the config block together with the guards they
+name, so a report that omits one predates it. The check is on absence rather than value, which
+makes it work for files written before the key existed. Verified both ways: the two current
+reports load, and the withdrawn one raises.
+
+`validation/audit_comparability.py` sweeps all 26 graded reports and reports what may be compared
+with what. Run after this fix: nothing flagged. The audit itself produced two false positives on
+its first run, both of the same class it exists to catch, and both are now fixed and commented.
+Its limits are stated in its docstring: it does not match block width, seed or architecture.
+
+This is another instance of a pattern this project has hit repeatedly: a plausible number
+computed on a wrong basis, passing without an error. It also shows the standing rule is not
+enough on its own. "Check the denominators match" was applied here, found a 0.8 percent
+difference in token counts, and concluded the difference was too small to matter. The missing
+step was asking what *mechanism* produced the gap, rather than whether its size seemed tolerable.
+A 0.8 percent difference in tokens produced a 246-fold difference in edges, because the missing
+tokens were all BOS, and BOS co-fires with everything.
+
+**Closes when.** `fixed`.
+
+---
+
+## 2026-09-11 — The toy evaluator always loaded one fixed tree, whatever the checkpoint was trained on   `fixed`
+
+**Symptom.** None. `eval_metrics.py --dataset toy` produced a complete report for nine
+checkpoints trained on `configs/tree_decorrelated.json`, having scored every one of them on
+activations from `configs/tree.json`. FVE, L0, feature density and the decoder heatmap were all
+written without complaint.
+
+**How it surfaced.** We ran the evaluation, then paused before quoting the numbers to check
+which tree the loader had used. Nothing in the output said. The defect had already produced its
+full set of files by then.
+
+**Root cause.** `get_toy_activation_loader` takes `tree_file` with a default of
+`configs/tree.json`. `eval_metrics.py` called it with two arguments and never passed the third,
+and the script had no `--tree_file` option at all. Until 2026-09-11 only one toy tree existed,
+so the hardcoded default was invisibly correct. Adding a second tree made it wrong without
+changing any line of the evaluator.
+
+**Blast radius.** One evaluation batch, deleted before any number was read or reported. The
+nine affected directories under `eval_results/decorr_toy/` were removed and regenerated against
+the correct tree. Evaluations of the `temporal_toy` checkpoints are unaffected, because those
+models were trained on `configs/tree.json`, which is what the default loads. No published or
+recorded number came from the bad run.
+
+**Fix.** `eval_metrics.py` gained `--tree_file`. `SAEConfig` gained a `tree_file` field, and
+`train_toy.py` records it, so a checkpoint now carries the tree it was trained on. The evaluator
+defaults to that recorded tree rather than to a constant.
+
+**Prevention.** The evaluator refuses a mismatch instead of proceeding. If a checkpoint records
+one tree and `--tree_file` names another, it exits with both names in the message. For
+checkpoints trained before the field existed, it prints that no tree is recorded and names the
+one it is using. The general failure is that a default is correct only while one option exists;
+the guard removes the silence, not the default.
+
+---
+
+## 2026-09-10 — Every T-SAE ever trained on the toy optimised its temporal term at exactly zero   `fixed`
+
+**Symptom.** None. `scripts/train_toy.py --arch tsae` ran to completion, printed a falling
+loss, passed the BatchTopK threshold guard and wrote a checkpoint whose `cfg.json` says
+`TemporalSAEConfig`, `use_contrastive_loss: true`, `contrastive_weight: 0.1`. Nothing in the
+checkpoint, the logs or the config distinguishes it from a trained Temporal SAE. What it
+actually contains is a BatchTopK Matryoshka SAE. Had this not been caught, the paper's
+"Temporal SAE on the toy model" row would have been a Matryoshka SAE under another name —
+and the comparison against Matryoshka would have been a comparison of a model with itself.
+
+**How it surfaced.** Not by a failure, and not by us in the sense that mattered: the
+`sae-training` README already stated it in plain words under Outstanding Items — "the toy
+loader yields 2D `[tokens, d]` activations, so the contrastive branch never fires on the toy
+at all". It had been written down and left standing while `--arch tsae` remained a documented,
+runnable option on that exact loader. It surfaced properly only on going to *run* the thing
+and reading `TemporalSAE.forward` before trusting its output.
+
+**Root cause.** `TemporalSAE.forward` gates the contrastive term on `x.dim() == 3`, and
+`activations.get_toy_activation_loader` yields `[batch, d_in]` — the Bussmann tree has no time
+axis to give it. On 2D input the term is `x_flat.new_zeros(())`: a constant with
+`requires_grad=False`, added to nothing. Directly measured, 2D input gives
+`contrastive_loss = 0.0, requires_grad=False`; 3D gives `2.079, requires_grad=True`.
+
+The same gate exists in `PriorsInTimeSAE.forward`, so `--arch priors_in_time` on the toy has
+the identical property. That one is *documented* behaviour ("trains only its novel-code path
+there — a plain SAE") rather than a silent surprise, and is left as-is; it now warns.
+
+**Blast radius.** No published result. `metrics/outputs/toy_trained/` — the Tier-2 checkpoint
+behind the project's only ground-truth number (precision 1.00 / recall 0.67, 6 of 9 true
+edges) — is `--arch matryoshka` and never had a temporal term, so it is provably unaffected;
+`configs/recipes/toy_trained_tier2.json` pins `"arch": "matryoshka"`. No T-SAE toy checkpoint
+had been trained before today. Every T-SAE number in this project post-dates the fix.
+
+**Fix.** `toy_model.TemporalTreeSampler` supplies the missing time axis by depth-scaled
+persistence, `activations.get_toy_sequence_loader` yields `[batch, seq_len, d_in]`, and
+`train_toy.py` routes `--arch tsae` to it by default. The persistence construction leaves the
+per-token marginal exactly unchanged (expected L0 stays at the tree's 1.12), so
+`--persistence 0` is a genuine null control rather than a different dataset.
+
+**Prevention.** Three guards, none of which is a promise:
+
+- `train_toy.py` **refuses** `--temporal_data off` on an architecture with a temporal term,
+  naming `--persistence 0` as the way to get a no-temporal-structure control without
+  reverting to flat tokens; `priors_in_time` under the default warns loudly.
+- `trainer.train_sae` now records `contrastive_loss` in `history`, not only in W&B. A run with
+  no W&B project previously left no trace anywhere that the term had read zero throughout.
+- `tests/test_tsae.py::test_contrastive_term_is_dead_on_flat_tokens` pins the zero-and-no-grad
+  behaviour on 2D and the live-with-grad behaviour on 3D, so the gate cannot be quietly
+  widened or narrowed. `tests/test_toy_tree.py` pins that persistence does not move the
+  marginal, which is what makes the null a control.
+
+---
+
 ## 2026-08-07 — The metrics' maths was "checked" by reading it, twice   `fixed`
 
 **Symptom.** None, and there was nothing to see: no formula was wrong. The defect is that

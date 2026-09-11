@@ -133,6 +133,6 @@ Shape conformance is the easy half. These are the checks that actually catch a w
 2. Run `validate_stats.py` on the result. Shape errors are cheap to fix here and expensive to
    diagnose after the metrics have produced plausible-looking numbers.
 3. **Reproduce a known number before trusting it.** The trained-toy tier reports precision 1.00 and
-   recall 0.67 (6 of 9 edges, zero false positives). An adapter that routes the toy through the
+   recall 1.00 (9 of 9 edges, zero false positives). An adapter that routes the toy through the
    generic path must land on exactly those figures. Silent drift is the real risk: wrong statistics
    still produce numbers, just wrong ones.

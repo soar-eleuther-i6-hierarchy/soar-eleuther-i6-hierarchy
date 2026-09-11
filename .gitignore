@@ -34,3 +34,15 @@ scripts/hf_sync/upload_log.txt
 
 # Data pulled from the compute node for local testing (read-only copies)
 data/
+
+# Kept local, never committed. A directory rather than a list of filenames, so a new
+# local-only note does not have to remember to add itself here.
+#   SERVER.md     the GPU node: address, paths, environment
+#   DECISIONS.md  internal reasoning about the team's own choices
+research-log/local/
+
+# Local-only tooling, never committed. A directory rather than a filename, so a
+# rename inside it does not silently un-ignore the file.
+scripts/local/
+findings/
+dist/

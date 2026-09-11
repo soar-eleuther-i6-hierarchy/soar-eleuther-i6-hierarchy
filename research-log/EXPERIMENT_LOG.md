@@ -4,6 +4,733 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-09-12 00:35 +03 — Priors in Time on the temporal toy: what the two code halves track
+
+**Question.** The paper states that the novel code emphasises sudden changes. On the temporal
+toy a change is exactly locatable, because a parent's state persists with probability 0.95 and
+every flip is one we planted. Does the novel code mark those changes, and does the effect depend
+on the data carrying events at all?
+
+**How it can be answered.** Two predictions were written into the test script before any number
+was read. Novel-code activity is higher at parent-state changes than between them; and the
+difference is absent under `--persistence 0`, where each timestep is independent of the last.
+The second is what makes this a test: any measure reacting to a changing input satisfies the
+first on its own.
+
+**What we ran.** Nine runs, three cells by three seeds. `--arch priors_in_time --temporal_data
+on`, `topk` k=2, 40k steps, batch 200 x seq 16. Cells: the original tree with persistence, the
+decorrelated tree with persistence, and the original tree at persistence 0. Evaluation on 256
+held-out sequences, `torch.manual_seed(123)`.
+
+```bash
+uv run scripts/train_toy.py --steps 40000 --batch_size 200 --seq_len 16 \
+  --activation topk --k 2 --lr 0.03 --arch priors_in_time --temporal_data on \
+  --seed $s --persistence 0.95 0.6 --tree_file configs/tree.json
+python scripts/event_test.py
+```
+
+**Result.** Novel-code magnitude:
+
+| cell | at a change | between | ratio |
+| --- | --- | --- | --- |
+| `pit_temporal` | 0.109 | 0.079 | 1.38 |
+| `pit_decorr` | 0.140 | 0.061 | 2.31 |
+| `pit_null` | 0.118 | 0.073 | 1.62 |
+
+Active-feature count is 2.000 everywhere, fixed by topk at k=2.
+
+Predictive-code cosine similarity between consecutive timesteps:
+
+| cell | at a change | between | internal gap |
+| --- | --- | --- | --- |
+| `pit_temporal` | 0.9309 | 0.9829 | 0.05 |
+| `pit_decorr` | 0.7654 | 0.7987 | 0.03 |
+| `pit_null` | 0.4270 | 0.8954 | 0.47 |
+
+**Interpretation.** The novel-code ratio exceeds one in all three cells including the null, where
+the data contains no events. The measure separates "a parent's state changed" from "it did not",
+and does not separate data with events from data without.
+
+The predictive code does separate them. The null sits at 0.43 similarity at a change against
+0.93 and 0.77 for the other two, with an internal gap an order of magnitude larger. The
+predictive code stays smooth on temporally correlated data and fragments on independent data,
+which is consistent with the gemma measurement of 23:40, where the predictive component carried
+90.4% of reconstruction energy.
+
+**Answer.** Novel-code magnitude tracks change in the input rather than the presence of events.
+Predictive-code smoothness is what distinguishes the two data regimes here.
+
+**Caveats.** The separating measure was not the predicted one. Both predictions concerned the
+novel code, and the distinction appeared in the predictive code, recorded alongside but not
+stated in advance. A reading taken after seeing the numbers is weaker than one registered
+before it, and this should be repeated as a stated prediction before it carries weight.
+
+The test is our construction. Their released code contains no segmentation, so there was nothing
+to port, and whether this is the right way to test their claim is a question for the
+supervisors. Three seeds, one sequence length, one persistence schedule, one sparsity setting.
+The toy's events are parent-state flips; the paper's are narrative boundaries labelled by a
+language model. Alike in structure, not in content.
+
+---
+
+## 2026-09-11 — The fourth block pair on gemma layer 12, B3->B4
+
+**Question.** `B3->B4` had never been graded. It is disabled by default in `metrics/config.py`,
+behind `EXP0_B3B4`, because the 6144 x 24576 accumulators do not fit on a small card. The
+comment there predicted "a thin, noisy pair". That prediction had never been tested, and three
+points is too few to tell a trend from a bend.
+
+**Run.** GPU node, one A40, current code at `3c14f6b`, `EXP0_B3B4=1 --docs 400`, written to a
+separate directory so no existing cache was touched. Collection 210 s at 231 tok/s, then
+grading. Peak card memory about 26 GB of 49.
+
+**Control first.** A fresh cache regrades every pair, not only the new one, so the three
+existing pairs are the control. They reproduced the committed report exactly: 48,571 tokens and
+1,473 / 621 / 1,747 candidate edges. One field differed, `n_pairs_below_min_joint` at `2->3`,
+9,292,277 against 9,292,275, a gap of two in nine million. The fourth pair is therefore
+comparable with the three already in the paper.
+
+That control is what exposed the pre-BOS baseline error recorded in `ERROR_LOG.md` for the same
+day.
+
+**Result.**
+
+| pair | shape | edges | density | recon pass | PMI at chance | mean PMI | freq-driven | survival | joint-cov | superparents |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0->1 | 128 x 384 | 1,473 | 3.00e-02 | 0.539 | 0.759 | 0.366 | 0.019 | 0.998 | 0.506 | 2 |
+| 1->2 | 384 x 1536 | 621 | 1.05e-03 | 0.317 | 0.419 | 1.435 | 0.239 | 0.752 | 0.223 | 0 |
+| 2->3 | 1536 x 6144 | 1,747 | 1.85e-04 | 0.089 | 0.000 | 4.208 | 0.777 | 0.244 | 0.407 | 0 |
+| **3->4** | **6144 x 24576** | **3,277** | **2.17e-05** | **0.052** | **0.000** | **4.664** | **0.738** | **0.269** | **0.415** | **0** |
+
+**Reading.** The pair is thin but not noisy. Of 151 million possible pairs, 3,277 survive, which
+is 0.002 percent. Those survivors are the largest candidate set of the four pairs, and every
+metric on them is stable rather than erratic. The prediction in `config.py` was half right, and
+the half that was wrong is the half that would have justified skipping it.
+
+The fourth point turns three of these columns from a slope into a plateau. `2->3` and `3->4`
+agree closely on reconstruction pass, PMI at chance, frequency-driven share, survival and
+joint-child coverage, while both differ sharply from `0->1`. The decline with depth is therefore
+not continuous. It happens between the second and third pair and then stops.
+
+The two shallow pairs and the two deep pairs behave in opposite ways, and neither way is
+healthy. Shallow edges pass the reconstruction test but sit at chance co-firing: three quarters
+of `0->1` edges have PMI below 0.5, and their mean PMI is 0.366. Deep edges are the reverse. No
+`2->3` or `3->4` edge is at chance and their mean PMI is above 4, so they are genuinely
+correlated, but only 5 to 9 percent survive the reconstruction test and about three quarters are
+explained by frequency alone.
+
+**What this does not show.** One layer, one checkpoint, one corpus. The frequency control at
+depth is the same measurement that `I6-F006` found to be threshold-sensitive on gemma, so the
+three-quarters figure should be read with that sensitivity in mind. Nothing here says the blocks
+are the right place to look for hierarchy; it says what the metrics report when asked.
+
+**Ownership.** This pair belongs to Exp 0, which is shared work, not to the temporal
+workstream. It is recorded here because the run happened here.
+
+**Files.** `metrics/outputs/gemma-2-2b/layer_12_b3b4/metrics_report.{json,md}`. The 7.6 GB
+statistics cache and the 256 MB token cache stay on the node; they are reproducible from the
+command above and too large to carry.
+
+## 2026-09-11 23:40 +03 — Priors in Time at layer 12, and all three architectures on one depth
+
+**Question.** Which depth was the released Priors in Time SAE fitted to, and what does its
+dictionary look like there? Its `conf.yaml` says `block_id: 1` while the repository README says
+layer 12.
+
+**How it can be answered.** By reconstruction, as for the T-SAE in the 17:40 entry. An SAE
+rebuilds its own layer best. Unlike that case, this architecture reconstructs from two halves,
+novel plus predictive, and the predictive half is causal attention over earlier tokens, so it
+needs whole sequences.
+
+**What we ran.** The authors' `sae/saeTemporal.py` and `sae/utils.py` with their weights, so no
+part of the model is reimplemented. `omegaconf` was installed to unpickle the checkpoint. The
+node's expired token blocks public downloads, so `HF_HUB_DISABLE_IMPLICIT_TOKEN=1` was needed.
+
+```bash
+export CUDA_VISIBLE_DEVICES=3 HF_HUB_OFFLINE=1
+python pit_layer2.py    # FVE at seven depths
+python pit_quality.py   # dictionary quality at the winning depth, 200 docs
+```
+
+**Result.** FVE by depth:
+
+| `hidden_states` | 1 | 2 | 6 | 12 | 13 | 18 | 25 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| FVE | -0.021 | -0.015 | -0.025 | 0.729 | **0.793** | 0.518 | 0.088 |
+
+At `hidden_states[13]`, the output of block 12, over 24,025 tokens: width 9,216, FVE 0.792,
+novel L0 192.0 against k=192, dead features 0 of 9,216, avg max cos 0.114, and the predictive
+component carrying **0.904** of the reconstruction energy.
+
+**Interpretation.** The depth is the output of block 12, matching the README rather than
+`block_id`. This is the same depth established for the released T-SAE, so all three
+architectures now sit on one layer.
+
+Nine parts in ten of what reconstructs a token comes from its context rather than from what is
+new in it. That is the paper's central claim and it holds here. No feature is dead, against 25%
+for the released T-SAE and 11% for Matryoshka.
+
+The three are not three answers to one question. Matryoshka and T-SAE partition the dictionary
+and produce edges between features. Priors in Time partitions the representation into predicted
+and novel and produces none. Ranking them on hierarchy would assume it claims something it does
+not, which `I6-F005` establishes from the paper and its code.
+
+**Answer.** Layer 12, output of block 12. The dictionary is dense, fully alive, and mostly
+predictive.
+
+**Caveats, and one error worth recording.** FVE is not comparable across the three checkpoints:
+widths differ 3.5-fold and L0 tenfold, and both inflate reconstruction without architectural
+merit. `L0 = 192.00` is the TopK setting, not a measurement. The corpus here is `pile-10k`, not
+the `monology/pile-uncopyrighted` the checkpoint was trained on.
+
+The first layer sweep used only the novel code and returned FVE from -9.6 to -2.0 at every
+depth, rising monotonically. That is a broken computation, not a layer. The assumption behind it,
+stated out loud beforehand, was that the novel code alone would separate depths; it was wrong,
+and the architecture reconstructs from both halves. Fixing it moved FVE at the same depth from
+-4.11 to +0.729. This was the only one of the day's measurement errors that announced itself,
+because a negative FVE cannot be mistaken for a result.
+
+---
+
+## 2026-09-11 21:05 +03 — The first non-Matryoshka architecture through the full pipeline
+
+**Question.** The released T-SAE claims a high-level first block. Run through the same metric
+code as the released Matryoshka, on the same layer and corpus, what does that block actually
+produce?
+
+**How it can be answered.** `collect()` is source-agnostic, so an adapter supplying a model, an
+object with encode/decode/W_dec, and token sequences yields a stats file the metrics read
+unchanged. Comparison then requires three things held equal: the corpus, the metric code
+version, and a quantity that does not depend on block shape.
+
+**What we ran.** `adapters/from_tsae_gemma.py`, new, on the node with one card.
+
+```bash
+export CUDA_VISIBLE_DEVICES=3 HF_HUB_OFFLINE=1
+export EXP0_METRICS=$NODE_WORKDIR/metrics-current
+python from_tsae_gemma.py --ckpt . --out-dir ./exp0 --docs 400 --context 128 --device cuda
+python run_metrics.py --stats ./exp0/exp0_stats.pt --out-dir ./exp0/report
+python run_metrics.py --stats <layer_12>/exp0_stats.pt --out-dir ./msae_rerun
+```
+
+The block partition comes from the checkpoint, `[3276, 13108]`, not from `metrics/config.py`,
+which assumes gemma's five nested prefixes. The Matryoshka baseline is
+`gemma-2-2b/layer_12/metrics_report.json`, used as committed.
+
+Recorded 2026-09-11, later the same day: the baseline was briefly switched to a regenerated
+report, and this entry then gave two different reasons for the switch, both wrong. The first
+said the metric code had changed. The second retracted that and said the two caches held
+different corpora, on the arithmetic that 400 tokens is about one document.
+
+The measured cause is neither. The regenerated report was graded before BOS positions were
+excluded from the co-firing counts. The 400-token gap is one BOS position per document, which
+this log already recorded on the day of the BOS fix. BOS is an attention sink, so every feature
+pair collected 400 joint firings from that position alone and cleared `MIN_JOINT` on its own.
+The guard admitted almost everything, which is why that report shows 3,260 and 34,061 candidate
+edges where the current one shows 1,473 and 621.
+
+The table below is regraded against the committed report. The old one is in
+`gemma-2-2b/layer_12/withdrawn/`. A fresh collection on the node with the current code and
+`--docs 400` reproduced the committed report exactly, at 48,571 tokens and 1,473 / 621 / 1,747
+candidate edges.
+
+**Result.** Statistics: 48,571 tokens, L0 20.02 against k=20, 4,148 of 16,384 features never
+fire. The first block holds 20% of the dictionary and carries 63.5% of all firings.
+
+| | T-SAE 0->1 | MSAE 0->1 | MSAE 1->2 |
+| --- | --- | --- | --- |
+| parents x children | 3276 x 13108 | 128 x 384 | 384 x 1536 |
+| candidate edges | 1,621 | 1,473 | 621 |
+| edge density | 3.77e-05 | 3.00e-02 | 1.05e-03 |
+| superparents | 0 | 2 | 0 |
+| joint-child coverage | 0.381 | 0.506 | 0.223 |
+| dropped by MIN_JOINT | 2,281 | 2 | 93 |
+
+Share of firings carried by the first X% of the dictionary, in block order, with the
+frequency-sorted ceiling in brackets: at 20%, T-SAE 63.5% (77.8%), Matryoshka 60.8% (86.8%).
+
+**Interpretation.** The T-SAE first block is wide and highly active and produces almost no
+parent edges. 1,621 of 42.9 million possible pairs survive, 0.004%, against Matryoshka's 6.6%.
+That is a qualitative difference in what the block does, not a score on the same scale.
+
+Its zero superparents is a block-width effect. Matryoshka's 1->2 pair is also zero; the five
+appear only in its narrow 128-feature first block. A superparent is defined by out-degree as a
+fraction of the child block, so a wide block cannot reach the threshold as easily. This agrees
+with the project hypothesis rather than contradicting it: the pathology tracks a narrow
+bottleneck, and T-SAE has none at this position.
+
+MIN_JOINT discards 2,281 T-SAE edges while keeping 1,621, against 2 and 81 on Matryoshka. That
+bounds the entry of 16:10, which found MIN_JOINT nearly inert across its whole range on PCFG. A
+threshold's influence depends on the source, so the sensitivity analysis needs a gemma arm.
+
+**Answer.** The first non-Matryoshka architecture now runs through the full pipeline unchanged.
+Its high-level block is active but close to parentless, and its clean superparent count is
+explained by block width rather than by the architecture.
+
+**Caveats and three discarded measurements.** Density is a count, not a quality; `S_res`, the
+strict test, has not been run, though the residual cache exists. Block shapes cannot be matched
+between the two architectures, so `MSAE 1->2` is the closest in shape rather than a control.
+Both are published checkpoints trained by other people, so nothing here isolates the contrastive
+term.
+
+Three numbers were computed and rejected before reaching the table above, all of them plausible
+and all measuring the wrong thing. Block-0 occupancy of 1.000 at every depth, which is what
+chance gives at k=20 with a 20% block. A concentration ratio of 28.0x for Matryoshka against
+3.17x for T-SAE, which measures a 25-fold difference in block width. And the first
+superparent comparison, taken between two different versions of the metric code.
+
+---
+
+## 2026-09-11 19:20 +03 — Recorded late: why Tier 2 recall moved from 0.67 to 1.00 on 19 August
+
+Written on 11 September about a change made on 19 August. It is dated by when it was written,
+not by when it happened, so the log stays honest about what was known when. The change altered
+the only ground-truth number in the project and no entry was made at the time.
+
+**Question.** Tier 2 reported precision 1.00 and recall 0.67 from 7 August. On 19 August it
+began reporting 1.00 and 1.00. Six documents still quoted the old figure on 11 September. Did
+the metrics get weaker, or did the thing being measured get better?
+
+**How it can be answered.** The distinction is checkable from git history. If the metric code
+changed, the improvement belongs to the measurement and is suspect, because a metric that
+accepts more edges on a fixed model may simply have loosened. If the checkpoint changed, the
+improvement belongs to the model and the metric is unchanged.
+
+**What we ran.** Traced `outputs/trained_toy_calibration.json` through the metrics repository.
+
+```bash
+git log --oneline --follow -- outputs/trained_toy_calibration.json
+for c in <those commits>; do git show $c:outputs/trained_toy_calibration.json; done
+git log --since=2026-08-14 --until=2026-08-22 --oneline --name-only
+```
+
+**Result.**
+
+| commit | date | true positives | false negatives | recall |
+| --- | --- | --- | --- | --- |
+| e574a86 | 7 Aug | 6 | 3 | 0.67 |
+| 6b17fc8 | 19 Aug | 6 | 3 | 0.67 |
+| 39f06a2 | 19 Aug | 6 | 3 | 0.67 |
+| **c436280** | **19 Aug** | **9** | **0** | **1.00** |
+
+The commit that moved it is titled "feat(validation): adopt the notebook Matryoshka as the
+reference toy checkpoint". Commits in that window touched reporting and figures only; no metric
+function changed. The reference checkpoint is trained by
+`metrics/validation/notebooks/train_and_calibrate_on_toy.ipynb`, 40k steps, seed 0.
+
+**Interpretation.** The model improved and the measurement did not move. The earlier reference
+recovered 17 of 20 true features, so it could not reach more than 6 of the 9 edges: three edges
+had an endpoint the SAE had never learned. The current reference recovers all 20, and the same
+metric code then finds all 9 edges with no false positives.
+
+This matters for how the number is described. Read as a metric result, 1.00 would suggest the
+battery of gates became more permissive. It did not. Recall here is bounded by what the SAE
+learned, which is why the number is a property of the pair, model and metric, and should be
+reported as such.
+
+One detail found while checking, not previously recorded anywhere: the notebook jitters the true
+feature norms by about 5% and ships the directions it used in `true_feats`, which the calibration
+grades against rather than a clean identity basis. The reference toy world is therefore close to,
+but not identical with, the world `configs/tree.json` generates with identity directions. Results
+computed on the plain tree, including the temporal-toy work of 10 and 11 September, sit in a
+neighbouring world rather than the same one.
+
+**Answer.** The model got better, not the metric. Six documents quoting 0.67 as current were
+corrected on 11 September: `contracts/stats_schema.md`, `adapters/README.md`,
+`adapters/from_toy.py`, `metrics/validation/block_tree_alignment.py`, `sae-training/README.md`,
+and `sae-training/configs/recipes/toy_trained_tier2.json`. Earlier log entries quoting 0.67 were
+left untouched, because they were accurate when written.
+
+**Caveats.** This reconstructs the change from git rather than from a record made at the time.
+The recipe file still cannot regenerate the reference checkpoint, because that comes from the
+notebook and from a jittered world; it now says so instead of implying otherwise.
+
+---
+
+## 2026-09-11 17:40 +03 — The released T-SAE checkpoint on real gemma activations, and which layer it wants
+
+**Question.** Does the published Temporal SAE checkpoint behave correctly on real gemma-2-2b
+activations, and which depth was it trained on?
+
+**How it can be answered.** Its BatchTopK threshold of 7.30089 was calibrated on real
+activations, so running it on anything else says nothing: on random input it reports L0 of about
+7,000 against its own k=20. The first part is settled by measuring L0 on real activations. The
+second is settled by reconstruction, because an SAE rebuilds the layer it was fitted to better
+than a neighbouring one. Sparsity cannot settle it, since adjacent residual activations have
+similar scale and the threshold responds mostly to scale.
+
+**What we ran.** On `the GPU node`, one card, offline. Environment and constraints recorded in
+`SERVER.md`. The checkpoint was uploaded by `scp` rather than fetched, because the node's
+HuggingFace token is expired and `curl` is absent.
+
+```bash
+export CUDA_VISIBLE_DEVICES=3 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false
+~/exp0-venv/bin/python verify_tsae.py    # L0 at two depths, with and without BOS
+~/exp0-venv/bin/python layer_check.py    # FVE, L0 and block-0 occupancy at four depths
+```
+
+64 documents of `pile-10k`, context 256, 14,395 scored tokens per depth, BOS excluded.
+
+**Result.** L0 at `hidden_states[12]` is 19.76 with BOS and 19.56 without. At `[13]` it is 20.73
+and 20.50. Both sit near k=20.
+
+Reconstruction across four depths:
+
+| `hidden_states` | block output | FVE | L0 | block-0 occupancy |
+| --- | --- | --- | --- | --- |
+| 11 | block 10 | 0.5285 | 29.71 | 1.000 |
+| 12 | block 11 | 0.6522 | 19.56 | 1.000 |
+| 13 | block 12 | **0.7564** | 20.50 | 1.000 |
+| 14 | block 13 | 0.2103 | 74.39 | 1.000 |
+
+**Interpretation.** The checkpoint is sound. It reaches its own k on real activations and loads
+into our `TemporalSAE` with no missing or unexpected keys.
+
+The depth is `hidden_states[13]`, the output of block 12, by a margin of 0.104 FVE with a sharp
+fall either side. This confirms that `dictionary_learning`'s recorded layer index means the
+output of that block, which is one position later than the same number in HuggingFace's
+indexing. Reading the wrong depth would have produced a complete, plausible metric report on
+activations from a neighbouring layer.
+
+One measurement we are discarding rather than reporting. Block-0 occupancy reads 1.000 at every
+depth, which resembles the dense first block found in the inner-product condition on the toy
+(entry of 12:30 and `findings/I6-F004`). It is not evidence of that. With k=20 and a first block
+holding 20% of the dictionary, chance alone puts at least one block-0 latent on about 98.8% of
+tokens. The informative quantity is the first block's share of activation mass, which was
+measured on the toy but not here.
+
+**Answer.** The checkpoint works and its activations come from `hidden_states[13]`. Nothing here
+evaluates its hierarchy; it establishes the artifact and the input.
+
+**Caveats.** One corpus, 64 documents. FVE is computed on raw activations with no scaling factor
+applied. The four depths tested are 11 to 14; a wider scan was not run.
+
+---
+
+## 2026-09-11 16:10 +03 — Threshold ablation: only tau controls the accepted edge set
+
+**Question.** Two review comments asked why the acceptance thresholds take the values they do,
+and what would change at other values. Do the five thresholds that gate edge acceptance actually
+control the result, and does the current tau admit edges that co-fire only at chance?
+
+**How it can be answered.** Vary one threshold at a time, holding the others at their defaults,
+and report the accepted edge count together with the share of accepted edges whose PMI is below
+0.5. PMI near zero means two features co-fire at about the rate their individual firing rates
+predict, so that share estimates how much of the accepted set is frequency rather than
+structure. On the trained toy, precision and recall against the known tree are available too.
+
+**What we ran.** `metrics/validation/threshold_sweep.py`, new. It calls the same gating
+functions `run_metrics.analyse_pair` calls, and asserts that its default point reproduces
+`outputs/trained_toy_calibration.json` before sweeping, so it cannot become a second source of
+truth for the same checkpoint.
+
+```bash
+python3 validation/threshold_sweep.py                       # trained toy
+python3 validation/threshold_sweep.py --stats ../data/fmt \
+    --out outputs/threshold_sweep_pcfg.json                 # 12 PCFG runs
+```
+
+Grids: tau 0.1-0.95, min_fire 5-200, min_joint 0-100, recon_gain 0-0.1, freq_survival 0-0.75.
+
+**Result.** Trained toy: precision 1.00 and recall 1.00 at every value of every threshold,
+except tau <= 0.1 which gives precision 0.33.
+
+PCFG, block pair B0->B1, 12 runs, one knob at a time, mean +/- sd:
+
+| threshold | range | accepted edges | share at chance |
+| --- | --- | --- | --- |
+| tau | 0.1 to 0.95 | 2027 to 28 | 0.71 to 0.15 |
+| min_fire | 5 to 200 | 135 to 132 | 0.31 to 0.34 |
+| min_joint | 0 to 100 | 134 to 132 | 0.33 to 0.34 |
+| recon_gain | 0 to 0.1 | 136 to 44 | 0.33 to 0.17 |
+| freq_survival | 0 to 0.75 | 151 to 131 | 0.33 to 0.33 |
+
+tau in detail: 0.5 gives 134 +/- 151 edges at 0.33 +/- 0.24 chance share; 0.6 gives 84 +/- 130
+at 0.12 +/- 0.20; 0.9 gives 35 +/- 60 at 0.12 +/- 0.29.
+
+The frequency-survival gate measured before and after itself: chance share 0.33 before, 0.36
+after, at the default tau.
+
+**Interpretation.** Only tau controls the outcome. min_fire and min_joint move the accepted set
+by 1 to 2 percent across their whole ranges, so the stated value of n_co is close to irrelevant
+here. recon_gain does nothing near its default and begins to act at five times that value.
+
+At the tau in use, about a third of accepted edges co-fire at roughly chance. One step to 0.6
+cuts that to about an eighth for 37 percent fewer edges. Beyond 0.6 nothing improves, which
+answers the question about 0.9 directly: it is not better than 0.6, only smaller.
+
+The frequency-survival gate does not reduce the chance share. It removes edges, but not the ones
+co-firing at chance. We report that rather than a justification for its value.
+
+The toy cannot rank threshold settings, because every setting recovers the tree perfectly. Any
+claim that these defaults were calibrated on the toy would not be supported by it.
+
+**Answer.** Four of the five acceptance thresholds are close to inert on this data and only tau
+matters. At its current value a third of the accepted edge set is consistent with chance
+co-firing. We do not yet have a selection rule, so this is evidence against the current default
+rather than a justification of any value.
+
+**Caveats.** The PMI measure is not independent of the frequency-survival gate; the paper states
+this about itself and does not correct for it, so the before and after numbers bound the gate's
+effect rather than measure it. The spread across grammar configurations is larger than the mean
+at the default. One block pair; deeper pairs accept too few edges to compare. PCFG and toy only,
+no gemma. Six further thresholds gate other metrics and were not swept.
+
+---
+
+## 2026-09-11 12:30 +03 — Decorrelating frequency from depth: the first block follows frequency, not hierarchy
+
+Supersedes the reading in the two entries below. The measurements there stand. The conclusion
+that the inner-product loss recovers parent features does not.
+
+**Question.** When a model places parent features in the first block, is it selecting them
+because they are parents, or because they are frequent?
+
+**How it can be answered.** In `configs/tree.json` the two properties coincide. Parents fire at
+0.15 and distractors at 0.05, so parents are also the most frequent features. A second tree that
+reverses the ordering separates the explanations. If the first block follows hierarchy, it
+should still hold parents. If it follows frequency, it should hold distractors instead.
+
+**What we ran.** We built `configs/tree_decorrelated.json`. It has the same shape as the
+original: three parents with three mutually exclusive children each, plus eight childless
+distractors. Only the probabilities change. Parents fire at 0.04 and distractors at 0.115.
+Expected L0 is 1.112 against the original 1.120, so sparsity is held roughly constant and only
+the alignment between frequency and depth changes. In this tree the four most frequent features
+are four distractors, and no parent is among them.
+
+```bash
+COMMON="--steps 40000 --batch_size 200 --seq_len 16 --activation batch_topk --k 2 --lr 0.03 \
+        --latent_sizes 4 20 --persistence 0.95 0.6 --tree_file configs/tree_decorrelated.json"
+for s in 0 1 2; do
+  train_toy.py $COMMON --seed $s --arch tsae --contrastive_similarity cosine
+  train_toy.py $COMMON --seed $s --arch tsae --contrastive_similarity inner_product
+  train_toy.py $COMMON --seed $s --arch matryoshka --temporal_data on
+done
+```
+
+Checkpoints in `sae-training/checkpoints/decorr_toy/seed{0,1,2}_*`. Latents were matched to true
+features by decoder cosine similarity with a 0.4 threshold, counting distinct features. Held-out
+sample of 256 sequences of length 16, `torch.manual_seed(123)`.
+
+**Result.** Contents of the first block, four latents wide.
+
+| condition | parents, original tree | parents, decorrelated tree | distractors, decorrelated tree |
+| --- | --- | --- | --- |
+| `tsaeip_temporal` | 3.000 ± 0.000 | **0.667 ± 0.471** | 3.333 ± 0.471 |
+| `tsae_temporal` | 2.667 ± 0.471 | 1.333 ± 0.943 | 2.667 ± 0.943 |
+| `msae_temporal` | 2.333 ± 0.471 | 1.333 ± 0.943 | 2.667 ± 0.943 |
+
+Control for a competing explanation. All three parents were learned somewhere in the
+dictionary, in every condition and every seed: 3.000 ± 0.000. Total features recovered were
+16.333 ± 1.247 for `tsae_temporal`, 16.333 ± 0.471 for `tsaeip_temporal` and 17.000 ± 0.000 for
+`msae_temporal`.
+
+**Interpretation.** The parents are present in the dictionary but placed outside the first
+block. This is a placement effect, not a failure to learn them. That rules out the explanation
+that rare parents are simply never learned.
+
+The inner-product condition changes most between the two trees. It moves from 3.000 ± 0.000
+parents in the first block to 0.667 ± 0.471. Its first block fills with distractors instead.
+The same condition that looked strongest when frequency agreed with depth looks weakest when
+they disagree. That is the pattern expected from a method that selects frequent features
+efficiently.
+
+The comparison across conditions within the decorrelated tree is weaker. The gap between
+0.667 ± 0.471 and 1.333 ± 0.943 is smaller than the seed spread. We therefore do not claim that
+the inner-product version is worse than the others at parent recovery. The claim we do make is
+about the change within each condition across the two trees, and there the inner-product
+condition falls furthest.
+
+This converges with an independent result from the metrics validation work reported on
+7 September, which found that only the frequency property was recovered well across toys.
+
+**Answer.** The first block selects features by firing rate rather than by position in the
+hierarchy. The earlier finding that the inner-product loss recovers all three parents was a
+consequence of parents being the most frequent features in that tree. It does not survive when
+the two properties are separated. No condition tested here recovers hierarchy into the first
+block.
+
+**Caveats.** Three seeds, and the seed spreads are large. One decorrelated tree, one sparsity
+level, one block split, one persistence schedule. Seed 0 placed zero parents in the first block
+in all three conditions, which suggests shared variation we have not explained. The 0.4 matching
+threshold is inherited and was not varied. We have not run the hierarchy metrics on these
+checkpoints, so this concerns block membership rather than parent-to-child edge recovery.
+
+---
+
+## 2026-09-11 00:40 +03 — Block 0 selects the most frequent features, which the toy cannot separate from parents
+
+Qualifies the entry of 2026-09-10 22:30 below. That entry reported that the inner-product
+version of the T-SAE loss recovers all three parent features in the first block on every seed.
+The measurement stands. The reading does not, and this entry records why.
+
+**Question.** In the toy tree, does the first block select parents because they are parents, or
+because they are frequent?
+
+**How it can be answered.** Parents fire with probability 0.15, distractors with 0.05 and
+children with 0.03. The four most frequent features are therefore the three parents plus one
+distractor. If every trained model fills block 0 with exactly that set, then parent recovery and
+frequency selection produce identical outcomes, and this tree cannot distinguish them.
+
+**What we ran.** For each of the nine seeded checkpoints under
+`sae-training/checkpoints/temporal_toy/seed{0,1,2}_{tsae,tsaeip,msae}_temporal`, we matched each
+block-0 latent to a true feature by decoder cosine similarity with a 0.4 threshold. We compared
+the resulting set against the four most frequent features, measured on the same held-out sample
+of 256 sequences of length 16 (`torch.manual_seed(123)`).
+
+**Result.**
+
+| condition | block-0 composition, per seed | duplicate latents |
+| --- | --- | --- |
+| `tsaeip_temporal` | 3 parents + 1 distractor, on all three seeds | none |
+| `tsae_temporal` | 2P+1d, 3P+1d, 3P+1d | one on seed 0 |
+| `msae_temporal` | 2P+1d, 3P+1d, 2P+2d | one on seed 0 |
+
+No model placed a child feature in block 0, on any seed, in any condition. Every model that
+filled all four block-0 latents selected three parents and one distractor. This is exactly the
+composition predicted by frequency rank.
+
+Two block-0 latents matched the same true feature on seed 0 of `tsae_temporal` and seed 0 of
+`msae_temporal`. Both spent two of four latents on feature 8. The inner-product condition never
+did this.
+
+**Interpretation.** The composition of block 0 is fully consistent with selection by marginal
+firing rate. It is also consistent with parent recovery. This tree cannot separate the two,
+because frequency and depth are correlated by construction.
+
+This does not overturn the earlier measurement. The inner-product condition still reaches three
+distinct parents on every seed, where the two other conditions reach three on two seeds and two
+on one. It also avoids duplicate latents. What changes is the available explanation: the
+advantage may be more reliable frequency selection rather than hierarchy recovery. Frequency
+capture in a narrow first block is the failure this project exists to detect, so this
+explanation deserves equal weight.
+
+A separate correction: the earlier entry stated that FVE and L0 were unchanged between the
+cosine condition and the control, which is accurate, but omitted `avg max cos`. That measure is
+0.0773 ± 0.0884 for the cosine condition and 0.1787 ± 0.1235 for the control. The seed spreads
+overlap, so three seeds do not resolve it, but the omission made the cosine result look flatter
+than the data support.
+
+**Answer.** Block 0 selects the most frequent features in every condition we trained. In this
+tree, that set is the three parents plus one distractor, so the experiment cannot tell parent
+recovery apart from frequency selection. The claim that the inner-product loss recovers
+hierarchy is not supported. The claim that it fills block 0 more reliably, without duplicates,
+is supported at n=3.
+
+**Caveats.** Three seeds. One tree, one sparsity level, one block split. The matching threshold
+of 0.4 is inherited from `calibrate_on_trained_toy.py` and was not varied here. A tree in which
+parents are rare and some distractors are frequent would separate the two explanations directly.
+That experiment has not been run.
+
+---
+
+## 2026-09-10 22:30 +03 — T-SAE on the temporal toy: the paper's loss does nothing, the released code's loss works
+
+**Question.** Does the T-SAE contrastive term (arXiv:2511.05541, ICLR 2026) buy anything a
+Matryoshka SAE trained on the same temporally-correlated data does not already get for free?
+And does the answer depend on which of the two published definitions of `s(., .)` is used —
+the paper's cosine similarity, or the raw inner product its released code actually computes?
+
+**How it can be answered.** The toy tree is the only place we know the true parent->child
+structure, so "did block 0 recover the parents" has a ground-truth answer. The decisive
+control is a Matryoshka SAE on *identical* temporal data with no temporal term at all: if it
+scores the same on the T-SAE's own objective, the term is doing no work. A second control —
+the same T-SAE on i.i.d. sequences (`--persistence 0`) — separates the contribution of the
+data from the contribution of the loss. The persistence construction leaves the per-token
+marginal exactly unchanged (expected L0 stays 1.12), so that null is the same distribution
+with only the time correlation removed, not a different dataset.
+
+Crucially, each arm must be scored under the similarity function *it was trained with*, and
+the Matryoshka baseline scored under both — otherwise an arm is compared to a baseline
+measured on a different quantity.
+
+**What we ran.** `sae-training` @ working tree (see ERROR_LOG 2026-09-10 for the defect that
+made any of this necessary: before it, `--arch tsae` on the toy optimised its temporal term at
+a constant 0.0). Faithful block split `--latent_sizes 4 20`, matching the released Gemma
+checkpoint's `group_fractions [0.2, 0.8]`.
+
+```bash
+COMMON="--steps 40000 --batch_size 200 --seq_len 16 --activation batch_topk --k 2 \
+        --lr 0.03 --latent_sizes 4 20"
+for s in 0 1 2; do
+  # temporal data + contrastive term, paper's s(.,.)
+  train_toy.py $COMMON --seed $s --arch tsae --contrastive_similarity cosine        --persistence 0.95 0.6
+  # temporal data + contrastive term, released code's s(.,.)
+  train_toy.py $COMMON --seed $s --arch tsae --contrastive_similarity inner_product --persistence 0.95 0.6
+  # NULL: same marginal, no time correlation
+  train_toy.py $COMMON --seed $s --arch tsae --contrastive_similarity cosine        --persistence 0
+  train_toy.py $COMMON --seed $s --arch tsae --contrastive_similarity inner_product --persistence 0
+  # CONTROL: identical temporal data, no temporal term
+  train_toy.py $COMMON --seed $s --arch matryoshka --temporal_data on --persistence 0.95 0.6
+done
+```
+
+Checkpoints at `sae-training/checkpoints/temporal_toy/seed{0,1,2}_*`. Held-out eval: 256
+sequences x 16 steps, `torch.manual_seed(123)`. n=3 seeds; +- is population SD over seeds.
+
+**Result.** InfoNCE on block 0, every model scored under both similarity functions.
+Chance = ln(256) = 5.545.
+
+| cell | scored as cosine | scored as inner_product | parents in b0 | feats | FVE |
+| --- | --- | --- | --- | --- | --- |
+| `tsae_temporal` (cosine) | 5.217±0.046 | 5.435±0.016 | 2.667±0.471 | 18.33±0.94 | 0.983±0.004 |
+| `tsaeip_temporal` (inner prod) | 5.189±0.047 | **4.579±0.044** | **3.000±0.000** | 19.33±0.47 | 0.984±0.002 |
+| `msae_temporal` (no term) | 5.249±0.031 | 5.475±0.010 | 2.333±0.471 | 18.33±0.94 | 0.983±0.005 |
+| `tsae_null` | 5.575±0.002 | 5.546±0.001 | 2.667±0.471 | 18.33±0.47 | 0.986±0.003 |
+| `tsaeip_null` | 5.583±0.006 | 5.547±0.001 | 2.667±0.471 | 18.67±0.47 | 0.986±0.003 |
+
+Block-0 share of total activation mass, temporal arms: inner product 72.3 / 79.7 / 74.3 % per
+seed; cosine 36.6 %. Block-0 *occupancy* (fraction of tokens with any block-0 activity) for
+inner product: 95.2 / 42.7 / 43.5 % — seed-dependent, unlike the mass share.
+
+A `--k 8` arm (otherwise identical to `tsae_temporal`, n=1) gave b0 pair-occupancy 41.5 % vs
+41.0 % at k=2 and InfoNCE 5.220 vs 5.230.
+
+**Interpretation.** Two different answers depending on which `s(., .)` is used, and that is
+the result.
+
+*The paper's cosine loss does nothing here.* `tsae_temporal` scores 5.217±0.046 on the cosine
+objective; `msae_temporal`, which never optimised it, scores 5.249±0.031. Overlapping. Parent
+recovery is also flat (2.667±0.471 vs 2.333±0.471, a 0.33 difference against SD 0.47), as are
+FVE and feature count. What moves the metric is the *data*: temporal structure takes cosine
+InfoNCE from ~5.58 to ~5.22, and it does so just as much for the model with no temporal term.
+Adjacent-token code similarity is a property of temporally correlated inputs, not an
+achievement of optimising for it — which is precisely the weak test this project exists to
+replace.
+
+*The released code's inner-product loss does work.* 4.579±0.044 against the same baseline's
+5.475±0.010 on the same metric — roughly 20 SD, not a marginal effect. It puts all three true
+parents in block 0 on every seed (3.000±0.000, where no other arm is even reliably at 3), and
+recovers the most true features. It is not merely gaming its own metric: on the *cosine*
+metric it scores 5.189±0.047, nominally ahead of the cosine-trained model itself, though that
+gap is within noise. Its mechanism is visible in the mass share — it routes ~75 % of all
+activation mass into the 20 % high-level block, against ~37 % for cosine — and it pays nothing
+in reconstruction to do so.
+
+What this does *not* show. It does not show T-SAE recovers *hierarchy*: "3 parents in block 0"
+is a much weaker claim than a coherent parent->child edge set, and the metric battery has not
+been run on these checkpoints. It does not transfer automatically to Gemma: d_sae=20 with k=2
+is a far harsher sparsity regime than 16384 with k=20. The single `--k 8` arm argues sparsity
+is not what pins the cosine arm (occupancy and InfoNCE both barely moved), but that is n=1.
+Nothing here tests the paper's `"r"` (random earlier token) pairing, its `group_weights`
+asymmetry, or its non-contrastive L1 temporal variant — this repo implements none of the three.
+
+Alternative explanations that survive: the cosine arm might need a larger `contrastive_weight`
+than the reference default 0.1 to show an effect, which was not swept. And the inner-product
+advantage could in principle be a scale artefact — an unnormalised dot product can drive
+cross-entropy down by inflating magnitudes without reorganising anything — except that the
+parent-recovery and feature-count gains are scale-free and move the same way.
+
+**Answer.** On the toy, the contrastive term as *specified in the paper* is
+indistinguishable from no term at all, while the term as *implemented in the released code*
+works decisively. The divergence between the paper's cosine similarity and the code's raw
+inner product is therefore not an editorial detail — on this benchmark it is the difference
+between the architecture doing nothing and doing something. Any audit of T-SAE has to say
+which of the two it is auditing, and the published Gemma-2-2b L12 checkpoint is the
+inner-product one.
+
+---
+
 ## 2026-08-09 09:31 +03 — Rename output dirs: gemma2_2b→gemma-2-2b, pcfg→pcfg-matryoshka
 
 **Question.** The output directory names used in the site, config, and experiment log did not
@@ -238,6 +965,7 @@ The three new toy structures added earlier today — absorption, shared topic, i
 the synthetic toy only and still have no trained-SAE counterpart.
 
 ---
+
 
 ## 2026-08-07 21:30 +03 — The first Tier-3 reading since the BOS correction: the survivors' commonest failure is the one the battery cannot catch
 
@@ -715,7 +1443,7 @@ across as a 32 MB prefix (43,698 documents) of a 382 MB file, since grading read
 start of the stream and stops.
 
 ```bash
-pipeline/fetch_pcfg_runs.sh ruqiya@216.153.51.202 zipf
+pipeline/fetch_pcfg_runs.sh <user>@<node> zipf
 python3 adapters/from_pcfg.py --run-dir data/pcfg-run --layer 1 --docs 3400 \
         --out metrics/outputs/pcfg-matryoshka/exp0_stats.pt
 cd metrics && EXP0_RUN=pcfg-matryoshka python3 run_metrics.py --stats outputs/pcfg-matryoshka/exp0_stats.pt \
@@ -951,7 +1679,7 @@ hf download soar-eleuther-i6-hierarchy/experiment_0-stats --repo-type dataset --
 ```
 
 (The run behind these numbers pulled the same file off the compute node by `scp` instead,
-from `/mnt/ssd-2/soar-hierarchy/ruqiya/experiment_0/outputs/layer_24/`. The Hub command is
+from `$NODE_WORKDIR/experiment_0/outputs/layer_24/`. The Hub command is
 the reproducible route — it does not depend on node access or on one person's directory
 layout, and it is what the metrics README documents.)
 
