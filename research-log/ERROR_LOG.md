@@ -64,6 +64,48 @@ a test, a contract. "Be careful next time" is not prevention.
 
 ---
 
+## 2026-09-12 — The gemma threshold sweep was run on the pre-BOS cache, and its file could not say so   `fixed`
+
+**Symptom.** Appendix F and `I6-F006` reported the Matryoshka threshold sweep on gemma layer 12
+as 519 accepted edges at the operating point, 1,877 at $\tau=0.1$, chance share 0.75 rising to
+1.00. The counts were from the wrong corpus. The shape of the result, chance share rising with
+$\tau$ to 1.00 at 0.9, was the same on the right one.
+
+**How it surfaced.** While preparing a study guide for the appendix, the sweep's coverage count at
+the operating point, 3,262, was placed beside the committed report's 1,473 candidates and did not
+fit. It did fit the withdrawn pre-BOS report: 3,260 candidates plus the 2 that `MIN_JOINT`
+drops. The sweep's run log then confirmed it had loaded
+`experiment_0/outputs/layer_12/exp0_stats.pt` from the stale node checkout.
+
+**Root cause.** The same cache that produced the `I6-F008` error, reached by a different script.
+The sweep file itself recorded only rows: no token count, no guards, no path. So the
+comparability audit written after `I6-F008`, which checks report config blocks, had nothing to
+read and passed the file.
+
+**Blast radius.** One column in one table: the Matryoshka side of `tab:tau-gemma`, in Appendix F,
+`I6-F006`, and the generated `tab:tsae-threshold-reversal` and its figure. Provably unaffected:
+the T-SAE column (its coverage count 3,902 equals the current report's 1,621 + 2,281), the
+twelve PCFG runs (each sweep coverage count equals its own report's candidates plus dropped, all
+twelve checked), and the toy sweep, which reads no cache. The qualitative claim, that raising
+$\tau$ raises the chance share on gemma, is unchanged; every accepted-edge count on that column
+was wrong.
+
+**Fix.** Re-run on the local current cache (48,571 tokens, `bos_excluded: true`); coverage count
+1,475 = 1,473 + 2. Corrected numbers: 2,768 / 771 / 558 / 473 / 415 accepted at
+$\tau$ = 0.1 / 0.5 / 0.6 / 0.7 / 0.9, chance share 0.65 / 0.76 / 0.83 / 0.92 / 1.00. The old
+file is under `layer_12/withdrawn/threshold_sweep_pre_bos.json`. Appendix, finding, generated
+table and figure regenerated.
+
+**Prevention.** `threshold_sweep.py` now writes a `provenance` block into every cached-stats
+output: stats path, token count, `bos_excluded`, `min_joint`. The audit has a new check that
+flags a sweep without provenance and a sweep whose token count differs from the report beside
+it. The three existing sweep files were given provenance by verification rather than by
+assertion: each run's coverage count was matched to its own report. Run after: nothing flagged.
+
+**Closes when.** `fixed`.
+
+---
+
 ## 2026-09-12 — Two copies of the same training sweep ran at once, writing to the same directories   `fixed`
 
 **Symptom.** Training slowed to about 16 minutes per run against a measured 10. Nothing else

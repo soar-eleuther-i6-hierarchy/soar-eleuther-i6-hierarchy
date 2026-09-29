@@ -4,6 +4,186 @@ Newest first. Template and conventions: [`README.md`](README.md).
 
 ---
 
+## 2026-09-29 11:30 +03 — Two constructions of splitting: firing overlap sees copies, decoder cosine sees shards
+
+**Question.** The collaborator asked where the claim "sibling redundancy detects splitting" comes
+from: definition, prior work, or an experiment. The Tier-1 calibration is the experiment, but it
+plants splitting as *copies* (latents firing on the same tokens). His synthetic-dictionary toys
+plant it as *shards*: latents that share one direction and partition the feature's tokens
+(`synthdict.corruptions.split`, docstring: "share its direction and partition its firing"). Does
+the firing-overlap detector see shards at all?
+
+**How it can be answered.** Run his corruption on his own world (`only_isa`, 120 parent-child
+edges, half the parents split, k in {2, 3, 4, 6}, three seeds, 50,000 held-out tokens) and read
+two signals among each split feature's latents: pairwise Jaccard of firing (global and within the
+parent's tokens) and pairwise decoder cosine. The null is pairs of different unsplit parents.
+A cosine detector over every pair of parent-block latents is scored against the planted shard
+pairs.
+
+**What we ran.** `metrics_v2/validation/split_detectors.py`, new. It builds the world with
+`toygen` directly, because at the current PR tip (34f22db) two of his modules do not import:
+`scoring/core/gates.py` asserts its `GATE_SOURCES` against `metrics.rules.GATE_NAMES`, which
+gained `gate_pmi_positive` in 69c2292 (nine gates against eight), and `toygen/labels.py` assigns
+class names that `metrics/rules/classes.py` no longer lists after the look-alike rename. Both are
+recorded for the PR in `data/pr48-followup.md`.
+
+**Result.** Identical on every seed (the construction is deterministic given the seed).
+
+| k | shard Jaccard, global | shard Jaccard, within parent | shard decoder cosine | null cosine, abs, mean (max) | null Jaccard | P(shard \| child), median | cosine ≥ 0.9 detector, precision / recall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 | 0.000 | 0.000 | 1.000 | 0.065 (0.120) | 0.099 | 0.500 | 1.00 / 1.00 |
+| 3 | 0.000 | 0.000 | 1.000 | 0.065 (0.120) | 0.099 | 0.333 | 1.00 / 1.00 |
+| 4 | 0.000 | 0.000 | 1.000 | 0.065 (0.120) | 0.099 | 0.250 | 1.00 / 1.00 |
+| 6 | 0.000 | 0.000 | 1.000 | 0.065 (0.120) | 0.099 | 0.166 | 1.00 / 1.00 |
+
+**Interpretation.** On shards the firing-overlap detector reads 0.000, below even the null
+(0.099 between unrelated parents), so it does not merely miss the split: it reports the shards as
+healthier than unrelated features. Decoder cosine separates shards from the null by 1.000
+against 0.120 at worst, and a 0.9 cut recovers every planted pair with no false positive, at
+every k. P(shard | child) falls as 1/k, which is what his Figure 3 plots; the shards are also
+what the paper's "duplicated decoder directions" reading of splitting in Bussmann et al. counts.
+So the two constructions are two different pathologies from the metrics' point of view:
+duplicated *firing* (copies) is what sibling Jaccard detects, duplicated *direction* (shards) is
+what decoder cosine detects, and neither detector sees the other's case.
+
+**Answer.** "Sibling redundancy detects splitting" holds for duplicated latents under one parent
+and fails by construction for a feature sharded across disjoint token sets. On the collaborator's
+toys the working detector is decoder cosine between latents of the same block, with a clean
+margin. Both belong in the supporting group; the cosine form is not in any rule and needs the
+same treatment on a trained SAE before it becomes one.
+
+**Caveats.** Synthetic dictionaries with the true directions as decoder rows: cosine 1.000 is
+exact here and will not be on a trained SAE, where the same shards would be near, not equal.
+The null max of 0.12 is for random unit directions in 128 dimensions with 120 parents; a
+32,768-feature dictionary has many more near-collinear pairs, so the cut needs its own null
+there. The experiment splits parents only, which is the only role his `only_isa` world offers.
+
+---
+
+## 2026-09-29 09:30 +03 — The survival funnel: of the edges coverage proposes, 1.1% on gemma Matryoshka are confirmed by every gate
+
+**Question.** The mentors' definition of success is the share of proposed edges that hold; one
+mentor asked for "what part of Matryoshka's connections still holds after all these metrics". The
+pure-metrics table gives each gate's share separately; the intersection was never computed.
+
+**How it can be answered.** Recompute every per-edge mask for block pair 0->1 from the cached
+statistics with the same functions `run_metrics.py` uses, take the probe verdicts per edge from
+`second_pass.json`, and count cumulatively in the order of the hierarchy rule: candidates, PMI
+>= 0.5 (the table's chance-level cut), survival >= 0.5, reconstruction, probe. Strict: an edge a
+gate cannot measure (survival with too few rare firings, a child with too few probe positives)
+is not confirmed and leaves at that gate. The counts of those are kept in the JSON.
+
+**What we ran.** `reporting/make_survival_funnel.py`, new. Sources: gemma Matryoshka L12 (stats
++ second pass), gemma T-SAE L12 (report + second pass only; its `exp0_stats.pt` is on the node,
+not on disk and not on the HF dataset, so stages 3-5 are intervals bounded from the report
+counts), the Matryoshka toy and the three T-SAE toy seeds under `outputs/toy-temporal/pipeline/`
+(probe: the Tier-2 calibration's 9/9 for Matryoshka; none for T-SAE), and the twelve PCFG
+formatting-sweep runs.
+
+**Result.** Edges still confirmed after each gate.
+
+| setting | candidates | PMI >= 0.5 | survival | reconstruction | probe | final share |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Matryoshka, gemma L12 | 1,473 | 355 | 329 | 188 | 16 | 0.011 |
+| T-SAE, gemma L12 | 1,621 | 1,621 | 1,191 | [1,168, 1,191] | [317, 770] | 0.20-0.48 |
+| Matryoshka toy | 9 | 9 | 9 | 9 | 9 | 1.000 |
+| T-SAE toy (3 seeds) | 9.3 ± 0.6 | 9.3 ± 0.6 | 9.3 ± 0.6 | 9.3 ± 0.6 | no probe | 1.000 at gate 4 |
+| Matryoshka, PCFG L2 (12 runs) | 157.8 ± 200.2 | 97.3 ± 140.0 | 75.2 ± 109.1 | 71.9 ± 105.4 | 4.2 ± 4.1 | 0.042 |
+
+Unmeasurable edges that left the funnel: gemma Matryoshka none at survival, none at the probe
+(all 1,111 shortlisted edges were scored); gemma T-SAE 323 at survival and 303 at the probe.
+The 22 probe passes on gemma Matryoshka become 16 once PMI >= 0.5, survival and reconstruction
+are also required; the probe shortlist used PMI > 0.
+
+**Interpretation.** The independence null is the cut that matters on gemma Matryoshka: it
+removes 76% of candidates on its own, reconstruction another 43% of what is left, and the probe
+confirms 16. On the T-SAE the same gates remove little; what removes edges there is data, not
+the gates: 323 edges have children too rare to test survival and 303 too rare to fit a probe.
+The two toys lose nothing. PCFG's spread across runs (sd larger than the mean at every stage)
+is a property of the sweep, not of a gate.
+
+**Answer.** On gemma, 1.1% of the edges Matryoshka's coverage proposes hold under every gate;
+the Temporal SAE holds between 20% and 48%, the exact value pending its statistics file; the
+toys hold everything. Figure `paper_figuers/survival_funnel.png`, counts in
+`survival_funnel.{md,json}`.
+
+**Caveats.** The T-SAE gemma interval closes to a point once `exp0_stats.pt` from the node run
+of 11 September is copied beside its report; the script takes it with `--tsae-stats`. A local
+regeneration was attempted and abandoned: the adapter needs `transformer_lens`, whose current
+release (4.0) has a different API and whose 2.x releases would downgrade `transformers` and
+`numpy` in the shared environment. Strictness is a choice: counting unmeasurable edges as "not
+rejected" instead would raise the T-SAE final share and leave the others unchanged.
+
+---
+
+## 2026-09-29 08:40 +03 — The Temporal SAE toy through the full pipeline: two seeds exact, one seed with two false edges
+
+**Question.** The mentors asked for the pure metrics on both architectures on gemma *and* on the
+simple toy. The gemma pair existed; the toy had only the Matryoshka column. The 10 September entry
+trained T-SAE on the temporal toy but said in so many words that "the metric battery has not been
+run on these checkpoints". Does it run, and what does it give?
+
+**How it can be answered.** The temporal-toy checkpoints have the same format as the Matryoshka
+toy (cfg.json, W_enc/W_dec/b_enc/b_dec, a batch_topk threshold), and the temporal term acts at
+training time only, so `adapters/from_toy.py --ckpt` reads them unchanged. The toy adapter matches
+latents to true features by decoder cosine and passes the parent and child latents as index lists,
+so the architecture's own block split ([4, 20]) plays no role; the comparison is on what the
+dictionary learned, not on where it put it. The inner-product arm (`tsaeip_temporal`) is the one
+that matches the released gemma checkpoint and the one the 10 September entry found to work.
+
+**What we ran.**
+
+```bash
+python3 adapters/from_toy.py --ckpt metrics/outputs/toy_trained/matryoshka_toy --out .../matryoshka_toy/toy_stats.pt
+for s in 0 1 2; do
+  python3 adapters/from_toy.py --ckpt sae-training/checkpoints/temporal_toy/seed${s}_tsaeip_temporal \
+                               --out .../tsaeip_s$s/toy_stats.pt
+done
+python3 run_metrics.py --stats .../toy_stats.pt --out-dir .../report     # each of the four
+python3 -m reporting.make_pure_metrics --toy .../matryoshka_toy/report \
+        --tsae-toy .../tsaeip_s0/report .../tsaeip_s1/report .../tsaeip_s2/report
+```
+
+200,000 draws, seed 0, 2,069 distinct world states, 199,936 tokens after the context split; same
+for every checkpoint. Outputs kept under `metrics/outputs/toy-temporal/pipeline/`. The adapter's
+default `--ckpt` points at `outputs/toy_trained/`, which no longer holds a checkpoint (they moved
+to `toy_trained/matryoshka_toy/`); it fails cleanly and the explicit path was used.
+
+**Result.** Block pair 0->1, kept edges translated to true-feature space through the match.
+
+| run | parents recovered | children recovered | edges | true | precision | recall |
+| --- | --- | --- | --- | --- | --- | --- |
+| Matryoshka toy | 3 | 9 | 9 | 9 | 1.00 | 1.00 |
+| T-SAE (inner product) seed 0 | 3 | 9 | 9 | 9 | 1.00 | 1.00 |
+| T-SAE (inner product) seed 1 | 3 | 9 | 9 | 9 | 1.00 | 1.00 |
+| T-SAE (inner product) seed 2 | 3 | 8 | 10 | 8 | 0.80 | 0.89 |
+
+The Matryoshka toy column reproduces the previously published pure-metrics column cell for cell
+(13 rows, no difference), so the persistent copy now replaces the `mktemp` directory the first run
+used. The T-SAE toy column, mean ± sd over the three seeds: 9 ± 1 edges, PMI 1.81 ± 0.15,
+poly-parenting 0.083 ± 0.144, Gini 0.022 ± 0.038, sibling redundancy 0.054 ± 0.093, joint-child
+coverage 0.658 ± 0.099; reconstruction, survival and chance-level are 1.000, 1.000 and 0.000 on
+every seed. Seed 2's two false edges are true parent 0 claiming true children 5 and 6, which
+belong to parent 4; its missing child is the ninth.
+
+**Interpretation.** On this toy the inner-product T-SAE is as good as Matryoshka on two seeds
+and slightly worse on one, and the way it is worse is a poly-parenting event, not a frequency or
+base-rate one: every other gate is at its ceiling. With three seeds that is a description, not a
+ranking. The probe column is n/a for the T-SAE toy because the toy adapter caches no residuals;
+the Matryoshka toy's probe number comes from the Tier-2 calibration file, not from this path.
+
+**Answer.** The battery runs on the T-SAE checkpoints unchanged. Both architectures recover the
+Bussmann tree; the T-SAE does so on two of three seeds exactly and on the third with two extra
+edges under one parent. The pure-metrics table and figure now carry five columns.
+
+**Caveats.** Three seeds. One toy, one sparsity level (k = 2), one block split. The T-SAE arm was
+trained on temporally correlated draws and is scored here on i.i.d. draws; the per-token marginal
+is the same by construction, so firing statistics are comparable, but nothing temporal is tested.
+`reporting.make_pure_metrics` gained a `--tsae-toy` option (one report directory per seed) and now
+keys mean ± sd on `n_runs` rather than on the PCFG source name.
+
+---
+
 ## 2026-09-12 00:35 +03 — Priors in Time on the temporal toy: what the two code halves track
 
 **Question.** The paper states that the novel code emphasises sudden changes. On the temporal
@@ -78,6 +258,47 @@ The toy's events are parent-state flips; the paper's are narrative boundaries la
 language model. Alike in structure, not in content.
 
 ---
+
+## 2026-09-12 — The gemma layer-12 threshold sweep, re-run on the current cache
+
+**Why.** The sweep behind Appendix F's gemma column had been run on the pre-BOS cache (see
+`ERROR_LOG.md`, same date). Everything else in that appendix was verified against its own report
+and stands. This entry records the re-run and what moved.
+
+**Run.** `validation/threshold_sweep.py --stats outputs/gemma-2-2b/layer_12/exp0_stats.pt` on
+the laptop; pure functions over the cached statistics, no accelerator. Cache: 48,571 tokens,
+`bos_excluded: true`, `min_joint: 30`. Coverage count at the operating point 1,475, which is the
+committed report's 1,473 candidates plus the 2 that `MIN_JOINT` drops.
+
+**Result, Matryoshka B0->B1, before (pre-BOS) and after (current).**
+
+| $\tau$ | accepted, before | chance, before | accepted, after | chance, after |
+| --- | --- | --- | --- | --- |
+| 0.1 | 1,877 | 0.65 | 2,768 | 0.65 |
+| 0.5 | 519 | 0.77 | 771 | 0.76 |
+| 0.6 | 375 | 0.85 | 558 | 0.83 |
+| 0.7 | 314 | 0.94 | 473 | 0.92 |
+| 0.9 | 281 | 1.00 | 415 | 1.00 |
+
+The other four knobs behave as before: `min_fire` and `min_joint` move the accepted set by under
+10 percent across their ranges, `recon_gain` is flat to 0.02 and bites at 0.05, `freq_survival`
+removes a few percent and leaves the chance share unchanged.
+
+**Reading.** The claim in `I6-F006` is unchanged: on gemma, raising $\tau$ raises the share of
+accepted edges that sit at chance co-firing, to 1.00 at 0.9. What changed is every count. The
+pre-BOS cache proposed more candidates (3,262 against 1,475) and passed fewer of them through
+the reconstruction and frequency gates (519 against 771), so the two errors partly cancelled in
+the headline shape and not at all in the numbers.
+
+**One more count, clarified.** Appendix F said 1,601 of 2,772 PCFG sweep cells (58 percent)
+"accept no edge at all". That figure is the number of cells where nothing reaches the frequency
+gate. The number of cells that accept no edge after every gate is 1,659 (60 percent). The
+appendix wording matched the second quantity and carried the first number; it now carries
+1,659. The two were conflated when the count was first taken from the rows whose chance share
+was undefined, before the σ gate rather than after it.
+
+**Files.** `outputs/gemma-2-2b/layer_12/threshold_sweep.json` (now with a `provenance` block),
+old file under `withdrawn/`.
 
 ## 2026-09-12 — Five more seeds per cell, and a measure that did not survive them
 

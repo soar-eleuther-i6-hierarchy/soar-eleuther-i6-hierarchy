@@ -118,14 +118,27 @@ class ToySAE:
         thr = w.get("threshold")
         self.threshold = float(thr) if thr is not None else 0.0
         self.activation = cfg.get("activation_function", "batch_topk")
+        # The upstream reference checkpoint (the one Tier 2 publishes 1.00 / 1.00 on)
+        # centres nothing and rescales its input by a running-average normaliser. Read
+        # through the b_dec-centred path below it reports 0 alive features and a clean
+        # empty report, so the two families are told apart here the same way
+        # `calibrate_on_trained_toy.encode_decode` tells them apart.
+        self.scale = ((self.W_dec.shape[1] ** 0.5) / w["normalizer.running_avg"]
+                      if "normalizer.running_avg" in w else None)
 
     def encode(self, x):
+        if self.scale is not None:
+            codes = torch.relu((x * self.scale) @ self.W_enc + self.b_enc)
+            return (codes * self.W_dec.norm(dim=1)) / self.scale
         pre = torch.relu((x - self.b_dec) @ self.W_enc + self.b_enc)
         if self.activation == "relu" or self.threshold <= 0:
             return pre
         return pre * (pre > self.threshold)
 
     def decode(self, f):
+        if self.scale is not None:
+            codes = f * self.scale / self.W_dec.norm(dim=1)
+            return (codes @ self.W_dec + self.b_dec) / self.scale
         return f @ self.W_dec + self.b_dec
 
 
