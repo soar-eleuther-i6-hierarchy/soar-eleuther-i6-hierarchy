@@ -2427,3 +2427,48 @@ the right ordering, which leaves what the data distribution does to it as the ex
 for the production failure — the thing Exp 2 sweeps.
 
 ---
+
+## 2026-10-04 — Funnel v2: bands, supporting panel, rule funnel, PCFG by density
+
+Asked for in the 4 Oct meeting (Elena, Chidaksh, Martin). `reporting/make_survival_funnel.py` rewritten; same stage
+masks as before, three new outputs under `outputs/paper_figuers/`.
+
+- `survival_funnel.png`: PCFG and T-SAE toy drawn as mean ± sd bands (thin per-run lines removed); legend says
+  which line is bounded; a right panel reads the four supporting criteria on the edges that survive all five
+  core criteria. Gemma Matryoshka, 16 survivors: 1 of 14 surviving children has two parents, no dense parent,
+  sibling overlap 0.064, R_supp 1.000. PCFG (4.2 survivors): multi-parenting 0.31 ± 0.25, sibling overlap 0.16.
+  Toys: all three parents count as dense (3 of 9 children clears 30%).
+- `survival_funnel_rules.png`: the same funnel under `metrics.rules.rule_hierarchy` (ruleset 2), clause by
+  clause through `score_pairs` with the probe gate built from second_pass.json. Gemma Matryoshka 1,472 → 1,110 →
+  1,084 → 20; the 16 core survivors are a subset of the 20, and the four extra all fail the reconstruction
+  contribution on the child's own gain (< 0.01) while clearing PMI ≥ 0.5 and survival. PCFG 4.1 ± 3.4 (0.048).
+  Strict containment drops exactly one gemma pair relative to keep_edges.
+- `survival_funnel_pcfg_density.png`: PCFG split by formatting density with bands; the survival stage is the
+  only one that moves with density (removes nothing at 0.00/0.17, a third of the remaining edges at 0.24).
+- Gemma T-SAE: supporting panel and rule funnel need `exp0_stats.pt`, which is on the compute node; left empty
+  and said so in the figure. The dashed line in the main figure has the same cause (not the two JSON files, as
+  said in the meeting).
+
+Paper (local copy of the Overleaf download, not yet uploaded): Section 4 funnel is now a two-panel `figure*`
+with the new caption and a sentence on the survivors; App_PureMetrics gains the supporting table, the rule
+funnel figure and its counts table. Section 3: Chanin's f2 ⇒ f1 definition in one line, "valid" tied to the
+five core criteria, "properties mistaken for hierarchy", the hierarchy rule stated at the end of the core
+criteria, forward coverage justified, "not in a tree" removed. Build: 0 errors, 31 pages.
+
+## 2026-10-04 (later) — The gemma T-SAE funnel made exact from the node
+
+The 3.5 GB `exp0_stats.pt` of the 11 September T-SAE run is at
+`/mnt/ssd-2/soar-hierarchy/ruqiya/tsae-gemma-l12/exp0/` on the node (48,571 tokens, blocks
+3276 × 13108, matches the report). Downloading it ran at 0.3–2 MB/s, so instead the current
+metrics code was shipped to the node (`metrics-funnel/`, code only) and `funnel_from_stats` +
+`rules_funnel_from_stats` were run there; the result is `outputs/gemma-2-2b-tsae/layer_12/
+funnel_from_node.json`, which the script now reads by default (`--tsae-json`).
+
+Exact counts, 0->1: 1,621 → 1,621 → 1,191 → 1,171 → 555 (0.342), inside the earlier interval
+[317, 770]. Unmeasurable: 323 at survival, 239 at the probe (the report-only bound had said 303).
+Supporting on the 555: multi-parented children 0.165, dense parents 0, sibling overlap 0.082,
+R_supp 1.000. Rule funnel: 1,511 → 1,511 → 1,085 → 547 (0.362); strict containment removes 110
+pairs whose reverse coverage also clears τ. Paper: Section 4 caption and text, App_PureMetrics
+tables 6, 8, 9 updated; the dashed line and every "not on disk" note are gone. Build 0 errors.
+The scp of the full file continues in the background; when it lands, `--tsae-stats` reproduces
+the JSON.
